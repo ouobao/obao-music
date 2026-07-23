@@ -1,0 +1,31 @@
+{
+  "code": 0,
+  "new_album": {
+    "code": 0,
+    "data": {
+      "albums": [
+        {
+          "mid": "RELEASEALBUM01",
+          "name": "Fixture Release Album 01",
+          "release_time": "2026-07-01",
+          "type": 0,
+          "singers": [{ "name": "Fixture Release Artist 01" }]
+        },
+        {
+          "mid": "RELEASEALBUM02",
+          "name": "Fixture Release Album 02",
+          "release_time": "2026-07-02",
+          "type": 0,
+          "singers": [{ "name": "Fixture Release Artist 02" }]
+        },
+        {
+          "mid": "RELEASEALBUM03",
+          "name": "Fixture Release Album 03",
+          "release_time": "2026-07-03",
+          "type": 0,
+          "singers": [{ "name": "Fixture Release Artist 03" }]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+dist-electron/
+**/dist/
+**/dist-electron/
+
+# Runtime / logs / temp
+.runtime/
+logs/
+artifacts/
+*.log
+.tmp-*
+**/.tmp-*
+
+# Tooling / local IDE
+.opencode/
+.claude/
+.agents/
+.vscode/
+*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Test / Playwright
+playwright-report/
+test-results/
+**/playwright-results/
+coverage/
+
+# Packaging / binary drops
+.exe/
+*.exe
+*.dmg
+*.AppImage
+
+# Locks that are tool-specific (keep package-lock)
+bun.lock
+server.lock.json
+sessionSnapshots/

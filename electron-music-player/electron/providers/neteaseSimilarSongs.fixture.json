@@ -1,0 +1,41 @@
+{
+  "code": 200,
+  "songs": [
+    {
+      "id": 910001,
+      "name": "Fixture Similar Song One",
+      "artists": [
+        {
+          "id": 920001,
+          "name": "Fixture Artist One"
+        }
+      ],
+      "album": {
+        "id": 930001,
+        "name": "Fixture Album One",
+        "picUrl": "https://fixture.invalid/netease/similar-1.jpg"
+      },
+      "duration": 201000
+    },
+    {
+      "id": 910002,
+      "name": "Fixture Similar Song Two",
+      "artists": [
+        {
+          "id": 920002,
+          "name": "Fixture Artist Two"
+        },
+        {
+          "id": 920003,
+          "name": "Fixture Artist Three"
+        }
+      ],
+      "album": {
+        "id": 930002,
+        "name": "Fixture Album Two",
+        "picUrl": "https://fixture.invalid/netease/similar-2.jpg"
+      },
+      "duration": 242000
+    }
+  ]
+}

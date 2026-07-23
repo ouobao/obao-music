@@ -1,0 +1,117 @@
+:root {
+  color: #202124;
+  background: #f7f4f4;
+  font-family:
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    "Segoe UI",
+    Arial,
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+*,
+*::before,
+*::after {
+  outline: none !important;
+  outline-width: 0 !important;
+  outline-color: transparent !important;
+  outline-offset: 0 !important;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app-shell {
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  background: #f7f4f4;
+}
+
+.startup-panel {
+  width: min(560px, calc(100vw - 48px));
+  border: 1px solid #f1cfca;
+  border-radius: 8px;
+  padding: 28px;
+  background: #fff;
+  box-shadow: 0 20px 70px rgb(0 0 0 / 8%);
+}
+
+.startup-kicker {
+  margin: 0 0 8px;
+  color: #c73232;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.startup-panel h1 {
+  margin: 0 0 12px;
+  font-size: 28px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.startup-panel p {
+  margin: 0;
+  color: #666;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.startup-actions {
+  display: flex;
+  margin-top: 22px;
+}
+
+.startup-reload-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #c73232;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: #fff;
+  background: #c73232;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.startup-reload-button:hover {
+  border-color: #ad2727;
+  background: #ad2727;
+}
+
+.startup-reload-button:active {
+  transform: translateY(1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-reload-button {
+    transition: background-color 160ms ease, border-color 160ms ease;
+  }
+
+  .startup-reload-button:active {
+    transform: none;
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "recent": {
+    "code": 200,
+    "data": {
+      "dates": [
+        "2026-07-17",
+        "2026-07-16",
+        "2026-07-15"
+      ],
+      "description": "Fixture recommendation history",
+      "noHistoryMessage": "",
+      "purchaseUrl": "",
+      "songs": null
+    }
+  },
+  "detail": {
+    "code": 200,
+    "data": {
+      "dates": [],
+      "description": null,
+      "noHistoryMessage": "",
+      "purchaseUrl": "",
+      "songs": [
+        {
+          "id": 970001,
+          "name": "Fixture History Song 01",
+          "ar": [
+            {
+              "id": 980001,
+              "name": "Fixture History Artist 01"
+            }
+          ],
+          "al": {
+            "id": 990001,
+            "name": "Fixture History Album 01",
+            "picUrl": "https://example.test/history-01.jpg"
+          },
+          "dt": 181000
+        },
+        {
+          "id": 970002,
+          "name": "Fixture History Song 02",
+          "ar": [
+            {
+              "id": 980002,
+              "name": "Fixture History Artist 02"
+            }
+          ],
+          "al": {
+            "id": 990002,
+            "name": "Fixture History Album 02",
+            "picUrl": "https://example.test/history-02.jpg"
+          },
+          "dt": 202000
+        }
+      ]
+    }
+  }
+}
