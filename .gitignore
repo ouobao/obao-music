@@ -16,7 +16,7 @@ artifacts/
 .tmp-*
 **/.tmp-*
 
-# Tooling / local IDE
+# Tooling / local IDE / AI agents
 .opencode/
 .claude/
 .agents/
@@ -34,11 +34,21 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Test / Playwright
+# Test / Playwright (kept out even if reintroduced locally)
 playwright-report/
 test-results/
 **/playwright-results/
 coverage/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+*.fixture.json
+tests/
+**/test/
+vitest.config.ts
+playwright.config.ts
+vite.config.test.ts
 
 # Packaging / binary drops
 .exe/
@@ -46,7 +56,7 @@ coverage/
 *.dmg
 *.AppImage
 
-# Locks that are tool-specific (keep package-lock)
+# Tool locks
 bun.lock
 server.lock.json
 sessionSnapshots/

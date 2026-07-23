@@ -12,11 +12,8 @@
     "dev:vite": "vite --host 127.0.0.1",
     "build:electron": "tsc -p tsconfig.node.json",
     "build": "npm run typecheck && vite build && tsc -p tsconfig.node.json",
-    "brand:generate": "node scripts/generate-brand-assets.mjs",
     "windows:register-identity": "node scripts/register-windows-identity.cjs",
     "preview": "vite preview",
-    "test": "vitest",
-    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit"
   },
   "dependencies": {
@@ -29,9 +26,6 @@
     "zustand": "^5.0.2"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1",
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.1.0",
     "@types/node": "^22.10.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
@@ -40,10 +34,8 @@
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^33.2.1",
-    "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
     "vite": "^5.4.21",
-    "vitest": "^2.1.8",
     "wait-on": "^8.0.1"
   },
   "build": {
