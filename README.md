@@ -1,6 +1,6 @@
-# 欧包音乐（Ou Bao Music）
+# 欧包音乐（Obao Music）
 
-Electron + React + Vite 桌面音乐播放器。
+Obao Music：基于 Electron、React 与 Vite 构建的桌面音乐播放器。
 
 ## 环境要求
 

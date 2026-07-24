@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type { PlayableMedia } from '../../shared/musicTypes';
 import { usePlayerStore } from '../state/playerStore';
 
-const fallbackArtworkUrl = new URL('../../../assets/branding/oubao-logo.png', import.meta.url).href;
+const fallbackArtworkUrl = new URL('../../../assets/branding/obao-logo.png', import.meta.url).href;
 const mediaSessionActions: MediaSessionAction[] = [
   'play',
   'pause',

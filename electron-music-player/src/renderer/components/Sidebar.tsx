@@ -19,7 +19,7 @@ import type { AppView, ContentTransitionStyle, NavigationDirection } from '../st
 import { formatSidebarLikedPlaylistDisplayTitle, isProviderLikedPlaylist } from '../utils/playlistDisplay';
 import { formatProviderSourceLabel } from '../utils/providerDisplay';
 import type { Playlist, PlaylistOwnership, ProviderId, RemoteProviderId } from '../../shared/musicTypes';
-import oubaoLogoUrl from '../../../assets/branding/oubao-logo.svg';
+import obaoLogoUrl from '../../../assets/branding/obao-logo.svg';
 
 interface PrimaryNavItem {
   label: string;
@@ -362,7 +362,7 @@ export function Sidebar({
     <nav className={sidebarClassName} aria-label="主导航">
       <div className="brand-block">
         <span className="brand-mark" aria-hidden="true">
-          <img src={oubaoLogoUrl} alt="" />
+          <img src={obaoLogoUrl} alt="" />
         </span>
         <span className="brand-name">欧包音乐</span>
       </div>

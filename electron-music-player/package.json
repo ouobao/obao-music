@@ -1,5 +1,5 @@
 {
-  "name": "oubao-music",
+  "name": "obao-music",
   "productName": "欧包音乐",
   "description": "欧包音乐 Electron 播放器",
   "version": "0.1.0",
@@ -46,7 +46,7 @@
     "wait-on": "^8.0.1"
   },
   "build": {
-    "appId": "com.oubao.music",
+    "appId": "com.obao.music",
     "productName": "欧包音乐",
     "directories": {
       "output": "release"
@@ -65,7 +65,7 @@
       }
     ],
     "win": {
-      "icon": "assets/branding/oubao-logo.ico",
+      "icon": "assets/branding/obao-logo.ico",
       "target": [
         {
           "target": "nsis",

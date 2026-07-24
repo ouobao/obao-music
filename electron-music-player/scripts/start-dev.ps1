@@ -108,7 +108,7 @@ if (Test-Path -LiteralPath $PidFile) {
     [int]::TryParse($ExistingPidText.Trim(), [ref]$ExistingPid) -and
     (Test-AliveProcess -ProcessId $ExistingPid)
   ) {
-    Write-Host "Ou Bao Music is already running. PID: $ExistingPid"
+    Write-Host "Obao Music is already running. PID: $ExistingPid"
     Write-Host "Log: $OutLog"
     $Process = Get-Process -Id $ExistingPid
   } else {
@@ -141,7 +141,7 @@ if (-not $Process) {
 
   Set-Content -LiteralPath $PidFile -Value $Process.Id -Encoding ascii
 
-  Write-Host "Starting Ou Bao Music. PID: $($Process.Id)"
+  Write-Host "Starting Obao Music. PID: $($Process.Id)"
 }
 
 Write-Host "Dev server: $DevServerUrl"
@@ -158,7 +158,7 @@ do {
     if ($ExitCode -eq 0) {
       $ExitCode = 1
     }
-    Write-Error "Ou Bao Music exited before the renderer was ready. Exit code: $ExitCode." -ErrorAction Continue
+    Write-Error "Obao Music exited before the renderer was ready. Exit code: $ExitCode." -ErrorAction Continue
     exit $ExitCode
   }
 
@@ -172,5 +172,5 @@ do {
 } while ((Get-Date) -lt $Deadline)
 
 Clear-FailedStartup -ProcessId $Process.Id
-Write-Error "Ou Bao Music did not report renderer readiness within 35 seconds. Check $OutLog and $ErrLog." -ErrorAction Continue
+Write-Error "Obao Music did not report renderer readiness within 35 seconds. Check $OutLog and $ErrLog." -ErrorAction Continue
 exit 1

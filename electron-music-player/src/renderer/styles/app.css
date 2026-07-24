@@ -18916,9 +18916,9 @@ input {
 
 /* White/black theme contract and final page-level fixes. */
 :root {
-  --oubao-mint: #d84848;
-  --oubao-sky: #2f6f90;
-  --oubao-coral: #efc06a;
+  --obao-mint: #d84848;
+  --obao-sky: #2f6f90;
+  --obao-coral: #efc06a;
   --visual-accent: #cf3434;
   --visual-accent-soft: #f5dede;
   --visual-base-surface: #ffffff;
@@ -18949,14 +18949,14 @@ input {
   --qq-nav-active: color-mix(in srgb, #f5dede 84%, #cf3434 16%);
   --qq-danger: #c44952;
   --qq-success: #417a6b;
-  --qq-window-gradient: linear-gradient(145deg, color-mix(in srgb, var(--qq-window-bg) 90%, var(--oubao-mint) 10%), color-mix(in srgb, var(--qq-window-bg) 92%, var(--oubao-coral) 8%));
-  --qq-sidebar-gradient: linear-gradient(155deg, color-mix(in srgb, var(--qq-sidebar-bg) 88%, var(--oubao-mint) 12%), color-mix(in srgb, var(--qq-sidebar-bg) 92%, var(--oubao-sky) 8%));
-  --qq-content-gradient: linear-gradient(145deg, color-mix(in srgb, var(--qq-content-bg) 94%, var(--oubao-mint) 6%), color-mix(in srgb, var(--qq-content-bg) 95%, var(--oubao-coral) 5%));
-  --qq-panel-gradient: linear-gradient(145deg, color-mix(in srgb, var(--qq-content-bg) 93%, var(--oubao-sky) 7%), color-mix(in srgb, var(--qq-content-bg) 94%, var(--oubao-coral) 6%));
+  --qq-window-gradient: linear-gradient(145deg, color-mix(in srgb, var(--qq-window-bg) 90%, var(--obao-mint) 10%), color-mix(in srgb, var(--qq-window-bg) 92%, var(--obao-coral) 8%));
+  --qq-sidebar-gradient: linear-gradient(155deg, color-mix(in srgb, var(--qq-sidebar-bg) 88%, var(--obao-mint) 12%), color-mix(in srgb, var(--qq-sidebar-bg) 92%, var(--obao-sky) 8%));
+  --qq-content-gradient: linear-gradient(145deg, color-mix(in srgb, var(--qq-content-bg) 94%, var(--obao-mint) 6%), color-mix(in srgb, var(--qq-content-bg) 95%, var(--obao-coral) 5%));
+  --qq-panel-gradient: linear-gradient(145deg, color-mix(in srgb, var(--qq-content-bg) 93%, var(--obao-sky) 7%), color-mix(in srgb, var(--qq-content-bg) 94%, var(--obao-coral) 6%));
   --qq-glass-bg:
     linear-gradient(145deg, color-mix(in srgb, var(--qq-content-bg) 36%, transparent), color-mix(in srgb, var(--qq-content-bg) 28%, transparent)),
-    linear-gradient(135deg, color-mix(in srgb, var(--oubao-mint) 11%, transparent), color-mix(in srgb, var(--oubao-coral) 9%, transparent));
-  --qq-persistent-chrome-bg: linear-gradient(135deg, color-mix(in srgb, var(--qq-content-bg) 46%, var(--oubao-mint) 7%), color-mix(in srgb, var(--qq-content-bg) 40%, var(--oubao-sky) 6%));
+    linear-gradient(135deg, color-mix(in srgb, var(--obao-mint) 11%, transparent), color-mix(in srgb, var(--obao-coral) 9%, transparent));
+  --qq-persistent-chrome-bg: linear-gradient(135deg, color-mix(in srgb, var(--qq-content-bg) 46%, var(--obao-mint) 7%), color-mix(in srgb, var(--qq-content-bg) 40%, var(--obao-sky) 6%));
   --qq-app-glass-bg: linear-gradient(145deg, color-mix(in srgb, var(--qq-content-bg) 26%, transparent), color-mix(in srgb, var(--qq-content-bg) 20%, transparent));
 }
 
@@ -18990,8 +18990,8 @@ input {
   --qq-nav-active: #1a484b;
   --qq-glass-bg:
     linear-gradient(145deg, color-mix(in srgb, var(--qq-content-bg) 42%, transparent), color-mix(in srgb, var(--qq-window-bg) 34%, transparent)),
-    linear-gradient(135deg, color-mix(in srgb, var(--oubao-mint) 13%, transparent), color-mix(in srgb, var(--oubao-coral) 11%, transparent));
-  --qq-persistent-chrome-bg: linear-gradient(135deg, color-mix(in srgb, var(--qq-content-bg) 48%, var(--oubao-sky) 8%), color-mix(in srgb, var(--qq-window-bg) 44%, var(--oubao-coral) 8%));
+    linear-gradient(135deg, color-mix(in srgb, var(--obao-mint) 13%, transparent), color-mix(in srgb, var(--obao-coral) 11%, transparent));
+  --qq-persistent-chrome-bg: linear-gradient(135deg, color-mix(in srgb, var(--qq-content-bg) 48%, var(--obao-sky) 8%), color-mix(in srgb, var(--qq-window-bg) 44%, var(--obao-coral) 8%));
   --qq-app-glass-bg: linear-gradient(145deg, color-mix(in srgb, var(--qq-content-bg) 30%, transparent), color-mix(in srgb, var(--qq-window-bg) 24%, transparent));
   --app-scrollbar-thumb: rgb(104 210 173 / 34%);
   --app-scrollbar-thumb-hover: rgb(116 191 229 / 52%);

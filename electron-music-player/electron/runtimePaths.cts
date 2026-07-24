@@ -44,8 +44,8 @@ export function prepareRuntimePaths(options: RuntimePathOptions): RuntimePaths {
 export function resolveRuntimePaths(options: RuntimePathOptions): RuntimePaths {
   const argv = options.argv ?? process.argv;
   const env = options.env ?? process.env;
-  const explicitArgument = getArgumentValue(argv, '--oubao-data-dir');
-  const environmentDirectory = env.OUBAO_MUSIC_DATA_DIR?.trim();
+  const explicitArgument = getArgumentValue(argv, '--obao-data-dir') ?? getArgumentValue(argv, '--oubao-data-dir');
+  const environmentDirectory = env.OBAO_MUSIC_DATA_DIR?.trim() ?? env.OUBAO_MUSIC_DATA_DIR?.trim();
   const packaged = options.isPackaged;
   const execPath = options.execPath ?? process.execPath;
   const resourcesPath = options.resourcesPath ?? process.resourcesPath;
@@ -167,7 +167,7 @@ function isWithin(candidate: string, parent: string): boolean {
 
 function ensureWritableDirectory(directoryPath: string): void {
   fs.mkdirSync(directoryPath, { recursive: true });
-  const probePath = path.join(directoryPath, `.oubao-write-check-${process.pid}-${Date.now()}`);
+  const probePath = path.join(directoryPath, `.obao-write-check-${process.pid}-${Date.now()}`);
 
   try {
     fs.writeFileSync(probePath, os.EOL, { flag: 'wx' });

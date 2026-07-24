@@ -11,7 +11,8 @@ interface VisualState {
   resetForTest: () => void;
 }
 
-const storageKey = 'oubao-music-visual-preferences';
+const storageKey = 'obao-music-visual-preferences';
+const previousStorageKey = 'oubao-music-visual-preferences';
 const legacyStorageKey = 'mine-radio-visual-preferences';
 
 const createDefaultPreferences = () => ({
@@ -66,7 +67,7 @@ function readPreferences(): Pick<VisualState, 'themePreference' | 'themeId'> {
     return defaults;
   }
 
-  for (const key of [storageKey, legacyStorageKey]) {
+  for (const key of [storageKey, previousStorageKey, legacyStorageKey]) {
     const raw = window.localStorage.getItem(key);
     if (!raw) {
       continue;

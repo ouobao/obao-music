@@ -55,9 +55,9 @@ foreach ($Process in $FallbackProcesses) {
 }
 
 $ResultMessage = if ($HadTarget) {
-  'Ou Bao Music dev processes were stopped.'
+  'Obao Music dev processes were stopped.'
 } else {
-  'No Ou Bao Music dev processes were found.'
+  'No Obao Music dev processes were found.'
 }
 
 Write-Output $ResultMessage

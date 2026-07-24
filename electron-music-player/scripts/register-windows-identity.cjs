@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
-const APP_ID = "com.oubao.music";
+const APP_ID = "com.obao.music";
 const APP_NAME = "欧包音乐";
 const projectPath = path.resolve(__dirname, "..");
 
@@ -44,7 +44,7 @@ if (process.platform !== "win32") {
         projectPath,
         "assets",
         "branding",
-        "oubao-logo.ico",
+        "obao-logo.ico",
       );
       const operation = fs.existsSync(shortcutPath) ? "replace" : "create";
       const written = shell.writeShortcutLink(shortcutPath, operation, {

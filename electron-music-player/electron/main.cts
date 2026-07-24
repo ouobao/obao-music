@@ -30,7 +30,7 @@ import { createFullscreenTransitionController } from './windowFullscreenControll
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, screen, session, shell, Tray } = electron;
 const APP_NAME = '欧包音乐';
-const APP_ID = 'com.oubao.music';
+const APP_ID = 'com.obao.music';
 const DEV_RESTART_EXIT_CODE = 75;
 const isDev = !app.isPackaged && Boolean(process.env.VITE_DEV_SERVER_URL);
 const audioSourceRegistry = createAudioSourceRegistry();
@@ -88,7 +88,7 @@ try {
   app.setPath('sessionData', runtimePaths.sessionDataPath);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
-  dialog.showErrorBox('欧包音乐无法启动', `${message}\n\n请使用 --oubao-data-dir 指定一个可写的数据目录后重试。`);
+  dialog.showErrorBox('欧包音乐无法启动', `${message}\n\n请使用 --obao-data-dir 指定一个可写的数据目录后重试。`);
   app.exit(1);
   throw error;
 }
@@ -277,7 +277,7 @@ function createMusicProviderRegistry() {
   ]);
 }
 
-function getBrandAssetPath(fileName: 'oubao-logo.ico' | 'oubao-logo.png' | 'oubao-tray.png'): string {
+function getBrandAssetPath(fileName: 'obao-logo.ico' | 'obao-logo.png' | 'obao-tray.png'): string {
   const resourceRoot = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..');
   return path.join(resourceRoot, 'assets', 'branding', fileName);
 }
@@ -289,7 +289,7 @@ function configureWindowsAppIdentity(window: electron.BrowserWindow): void {
 
   window.setAppDetails({
     appId: APP_ID,
-    appIconPath: getBrandAssetPath('oubao-logo.ico'),
+    appIconPath: getBrandAssetPath('obao-logo.ico'),
     appIconIndex: 0,
     relaunchCommand: getWindowsRelaunchCommand(),
     relaunchDisplayName: APP_NAME
@@ -308,7 +308,7 @@ function createMainWindow(): electron.BrowserWindow {
     minWidth: 1040,
     minHeight: 680,
     title: APP_NAME,
-    icon: getBrandAssetPath('oubao-logo.png'),
+    icon: getBrandAssetPath('obao-logo.png'),
     frame: process.platform === 'win32',
     autoHideMenuBar: true,
     backgroundColor: getWindowBackgroundColor(),
@@ -564,7 +564,7 @@ function createTray(): void {
     return;
   }
 
-  tray = new Tray(getBrandAssetPath('oubao-tray.png'));
+  tray = new Tray(getBrandAssetPath('obao-tray.png'));
   tray.setToolTip(APP_NAME);
   updateTrayMenu();
   tray.on('click', restoreMainWindow);
