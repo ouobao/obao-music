@@ -1,6 +1,7 @@
 {
   "name": "oubao-music",
   "productName": "欧包音乐",
+  "description": "欧包音乐 Electron 播放器",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,6 +13,11 @@
     "dev:vite": "vite --host 127.0.0.1",
     "build:electron": "tsc -p tsconfig.node.json",
     "build": "npm run typecheck && vite build && tsc -p tsconfig.node.json",
+    "pack:win": "npm run build && electron-builder --dir --win --x64",
+    "dist:win": "npm run build && electron-builder --win nsis portable --x64",
+    "dist:win:nsis": "npm run build && electron-builder --win nsis --x64",
+    "dist:win:portable": "npm run build && electron-builder --win portable --x64",
+    "dist:win:msi": "npm run build && electron-builder --win msi --x64",
     "windows:register-identity": "node scripts/register-windows-identity.cjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit"
@@ -34,6 +40,7 @@
     "concurrently": "^9.1.0",
     "cross-env": "^7.0.3",
     "electron": "^33.2.1",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.7.2",
     "vite": "^5.4.21",
     "wait-on": "^8.0.1"
@@ -41,6 +48,11 @@
   "build": {
     "appId": "com.oubao.music",
     "productName": "欧包音乐",
+    "directories": {
+      "output": "release"
+    },
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
@@ -53,7 +65,41 @@
       }
     ],
     "win": {
-      "icon": "assets/branding/oubao-logo.ico"
+      "icon": "assets/branding/oubao-logo.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "include": "build/installer.nsh"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
+    },
+    "msi": {
+      "artifactName": "${productName}-${version}-${arch}.msi"
     }
+  },
+  "allowScripts": {
+    "electron": true,
+    "esbuild": true
   }
 }

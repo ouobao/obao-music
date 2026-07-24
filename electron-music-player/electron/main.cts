@@ -25,6 +25,7 @@ import { createProcessDiagnostics, sanitizeDiagnosticUrl } from './processDiagno
 import { registerQqCoverImageCorsPolicy } from './qqCoverImageCors.cjs';
 import { createFileCacheStore } from './storage/cacheStore.cjs';
 import { createFileLocalLibraryStore } from './storage/localLibraryStore.cjs';
+import { prepareRuntimePaths } from './runtimePaths.cjs';
 import { createFullscreenTransitionController } from './windowFullscreenController.cjs';
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, protocol, screen, session, shell, Tray } = electron;
@@ -79,18 +80,27 @@ const RENDERER_DIAGNOSTIC_FIELDS = new Set([
 const RENDERER_DIAGNOSTIC_RATE_WINDOW_MS = 60_000;
 const RENDERER_DIAGNOSTIC_RATE_LIMIT = 180;
 
-app.setPath('userData', path.join(app.getPath('appData'), 'electron-music-player'));
+let runtimePaths: ReturnType<typeof prepareRuntimePaths>;
+
+try {
+  runtimePaths = prepareRuntimePaths({ isPackaged: app.isPackaged });
+  app.setPath('userData', runtimePaths.userDataPath);
+  app.setPath('sessionData', runtimePaths.sessionDataPath);
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  dialog.showErrorBox('欧包音乐无法启动', `${message}\n\n请使用 --oubao-data-dir 指定一个可写的数据目录后重试。`);
+  app.exit(1);
+  throw error;
+}
 
 const diagnostics = createProcessDiagnostics({
-  filePath: app.isPackaged
-    ? path.join(app.getPath('userData'), 'logs', 'electron-main.jsonl')
-    : path.join(__dirname, '..', 'logs', 'electron-main.jsonl')
+  filePath: path.join(runtimePaths.logsPath, 'electron-main.jsonl')
 });
 const rendererReadyMarkerPath = isDev
   ? process.env.ELECTRON_RENDERER_READY_FILE?.trim() || null
   : null;
 
-const audioOutputPreferencePath = path.join(app.getPath('userData'), 'audio-output-settings.json');
+const audioOutputPreferencePath = path.join(runtimePaths.businessDataPath, 'audio-output-settings.json');
 const startupAudioOutputPreference = readAudioOutputPreference(audioOutputPreferencePath);
 let exclusiveModeEnabled = startupAudioOutputPreference.exclusiveModeEnabled;
 const activeExclusiveMode = process.platform === 'win32' && exclusiveModeEnabled;
@@ -104,6 +114,9 @@ diagnostics.log('process-start', {
   parentPid: process.ppid,
   isDev,
   isPackaged: app.isPackaged,
+  storageMode: runtimePaths.mode,
+  storagePathSource: runtimePaths.source,
+  sessionDataConfigured: true,
   activeExclusiveMode,
   versions: {
     electron: process.versions.electron,
@@ -253,9 +266,8 @@ function getWebContentsDiagnosticDetails(contents: electron.WebContents): Record
 }
 
 function createMusicProviderRegistry() {
-  const userDataPath = app.getPath('userData');
-  const providerCache = createFileCacheStore(path.join(userDataPath, 'provider-cache.json'));
-  const localLibraryStore = createFileLocalLibraryStore(path.join(userDataPath, 'local-library.json'));
+  const providerCache = createFileCacheStore(path.join(runtimePaths.businessDataPath, 'provider-cache.json'));
+  const localLibraryStore = createFileLocalLibraryStore(path.join(runtimePaths.businessDataPath, 'local-library.json'));
   const localProvider = createLocalProvider(localLibraryStore);
 
   return createProviderRegistry([

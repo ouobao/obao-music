@@ -51,6 +51,7 @@ playwright.config.ts
 vite.config.test.ts
 
 # Packaging / binary drops
+release/
 .exe/
 *.exe
 *.dmg
