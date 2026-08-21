@@ -1,232 +1,172 @@
 import { create } from 'zustand';
-import type { ProviderId, RemoteProviderId } from '../../shared/musicTypes';
 
-export type AppView =
-  | { type: 'home' }
-  | { type: 'search' }
-  | { type: 'playlist'; providerId: ProviderId; playlistId: string }
-  | { type: 'recommendationCollection'; providerId: RemoteProviderId; collectionId: string }
-  | { type: 'charts'; providerId: RemoteProviderId }
-  | { type: 'chart'; providerId: RemoteProviderId; chartId: string }
-  | { type: 'playlistDiscovery'; providerId: RemoteProviderId; categoryId: string }
-  | { type: 'artist'; providerId: RemoteProviderId; artistId: string }
-  | { type: 'album'; providerId: RemoteProviderId; albumId: string };
+export type ViewName =
+  | 'home'
+  | 'search'
+  | 'charts'
+  | 'playlistDiscovery'
+  | 'playlist'
+  | 'chart'
+  | 'artist'
+  | 'album'
+  | 'recommendationCollection'
+  | 'listeningHistory';
 
-export const contentTransitionStyles = ['soft', 'directional', 'layered'] as const;
+export interface ViewParams {
+  providerId?: string;
+  playlistId?: string;
+  chartId?: string;
+  artistId?: string;
+  albumId?: string;
+  collectionId?: string;
+  categoryId?: string;
+  keyword?: string;
+  title?: string;
+}
 
-export type ContentTransitionStyle = (typeof contentTransitionStyles)[number];
-export type NavigationDirection = 'forward' | 'backward';
+export interface ViewState {
+  name: ViewName;
+  params: ViewParams;
+}
 
-interface UiState {
-  isQueueOpen: boolean;
-  isSidebarCollapsed: boolean;
-  contentTransitionStyle: ContentTransitionStyle;
+const UI_STATE_KEY = 'musicplayer.ui-state';
+
+interface PersistedUiState {
+  contentTransitionStyle: 'soft' | 'directional' | 'layered';
   reduceEffects: boolean;
-  navigationDirection: NavigationDirection;
-  currentView: AppView;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  backStack: AppView[];
-  forwardStack: AppView[];
-  setQueueOpen: (open: boolean) => void;
-  toggleQueue: () => void;
-  setSidebarCollapsed: (collapsed: boolean) => void;
-  toggleSidebarCollapsed: () => void;
-  setContentTransitionStyle: (style: ContentTransitionStyle) => void;
-  setReduceEffects: (reduceEffects: boolean) => void;
-  navigateToView: (view: AppView) => void;
-  goBack: () => void;
-  goForward: () => void;
-  resetForTest: () => void;
 }
 
-const homeView: AppView = { type: 'home' };
-const UI_STATE_STORAGE_KEY = 'musicplayer.ui-state';
-
-type StoredUiPreferences = Pick<UiState, 'isQueueOpen' | 'contentTransitionStyle' | 'reduceEffects'>;
-
-const initialState = createInitialState();
-
-function createDefaultUiState() {
-  return {
-    isQueueOpen: false,
-    isSidebarCollapsed: false,
-    contentTransitionStyle: 'soft' as ContentTransitionStyle,
-    reduceEffects: false,
-    navigationDirection: 'forward' as NavigationDirection,
-    currentView: homeView,
-    canGoBack: false,
-    canGoForward: false,
-    backStack: [] as AppView[],
-    forwardStack: [] as AppView[]
-  };
-}
-
-function createInitialState() {
-  return {
-    ...createDefaultUiState(),
-    ...readStoredUiPreferences()
-  };
-}
-
-export const useUiStore = create<UiState>((set, get) => ({
-  ...initialState,
-  setQueueOpen: (isQueueOpen) => {
-    set({ isQueueOpen });
-    writeStoredUiPreferences(get());
-  },
-  toggleQueue: () => {
-    const isQueueOpen = !get().isQueueOpen;
-    set({ isQueueOpen });
-    writeStoredUiPreferences(get());
-  },
-  setSidebarCollapsed: (isSidebarCollapsed) => set({ isSidebarCollapsed }),
-  toggleSidebarCollapsed: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),
-  setContentTransitionStyle: (contentTransitionStyle) => {
-    set({ contentTransitionStyle });
-    writeStoredUiPreferences(get());
-  },
-  setReduceEffects: (reduceEffects) => {
-    set({ reduceEffects });
-    writeStoredUiPreferences(get());
-  },
-  navigateToView: (view) =>
-    set((state) => {
-      if (isSameView(state.currentView, view)) {
-        return { navigationDirection: 'forward' };
-      }
-
-      const backStack = [...state.backStack, state.currentView];
-      return {
-        currentView: view,
-        backStack,
-        forwardStack: [],
-        canGoBack: backStack.length > 0,
-        canGoForward: false,
-        navigationDirection: 'forward'
-      };
-    }),
-  goBack: () =>
-    set((state) => {
-      const previousView = state.backStack.at(-1);
-      if (!previousView) {
-        return {};
-      }
-
-      const backStack = state.backStack.slice(0, -1);
-      const forwardStack = [state.currentView, ...state.forwardStack];
-      return {
-        currentView: previousView,
-        backStack,
-        forwardStack,
-        canGoBack: backStack.length > 0,
-        canGoForward: forwardStack.length > 0,
-        navigationDirection: 'backward'
-      };
-    }),
-  goForward: () =>
-    set((state) => {
-      const nextView = state.forwardStack[0];
-      if (!nextView) {
-        return {};
-      }
-
-      const backStack = [...state.backStack, state.currentView];
-      const forwardStack = state.forwardStack.slice(1);
-      return {
-        currentView: nextView,
-        backStack,
-        forwardStack,
-        canGoBack: backStack.length > 0,
-        canGoForward: forwardStack.length > 0,
-        navigationDirection: 'forward'
-      };
-    }),
-  resetForTest: () => set(createDefaultUiState())
-}));
-
-function readStoredUiPreferences(): StoredUiPreferences {
-  const defaults: StoredUiPreferences = {
-    isQueueOpen: false,
-    contentTransitionStyle: 'soft',
-    reduceEffects: false
-  };
-
-  if (typeof localStorage === 'undefined') {
-    return defaults;
-  }
-
+function loadUiState(): PersistedUiState {
   try {
-    const rawState = localStorage.getItem(UI_STATE_STORAGE_KEY);
-    if (!rawState) {
-      return defaults;
-    }
-
-    const parsed = JSON.parse(rawState) as Record<string, unknown>;
+    const raw = localStorage.getItem(UI_STATE_KEY);
+    if (!raw) return { contentTransitionStyle: 'soft', reduceEffects: false };
+    const parsed = JSON.parse(raw) as Partial<PersistedUiState>;
     return {
-      isQueueOpen: typeof parsed.isQueueOpen === 'boolean' ? parsed.isQueueOpen : defaults.isQueueOpen,
-      contentTransitionStyle: isContentTransitionStyle(parsed.contentTransitionStyle)
-        ? parsed.contentTransitionStyle
-        : defaults.contentTransitionStyle,
-      reduceEffects: typeof parsed.reduceEffects === 'boolean' ? parsed.reduceEffects : defaults.reduceEffects
+      contentTransitionStyle: parsed.contentTransitionStyle ?? 'soft',
+      reduceEffects: Boolean(parsed.reduceEffects)
     };
   } catch {
-    return defaults;
+    return { contentTransitionStyle: 'soft', reduceEffects: false };
   }
 }
 
-function writeStoredUiPreferences(state: StoredUiPreferences) {
-  if (typeof localStorage === 'undefined') {
-    return;
-  }
-
+function persistUiState(state: PersistedUiState) {
   try {
-    localStorage.setItem(UI_STATE_STORAGE_KEY, JSON.stringify({
-      isQueueOpen: state.isQueueOpen,
-      contentTransitionStyle: state.contentTransitionStyle,
-      reduceEffects: state.reduceEffects
-    }));
+    localStorage.setItem(UI_STATE_KEY, JSON.stringify(state));
   } catch {
-    // UI preferences remain usable in memory when local storage is unavailable.
+    // ignore
   }
 }
 
-function isContentTransitionStyle(value: unknown): value is ContentTransitionStyle {
-  return contentTransitionStyles.includes(value as ContentTransitionStyle);
+export interface UiState {
+  currentView: ViewState;
+  backStack: ViewState[];
+  forwardStack: ViewState[];
+  canGoBack: boolean;
+  canGoForward: boolean;
+  isQueueOpen: boolean;
+  isSimilarOpen: boolean;
+  contentTransitionStyle: 'soft' | 'directional' | 'layered';
+  reduceEffects: boolean;
+  navigationDirection: 'forward' | 'backward';
+
+  navigateToView(name: ViewName, params?: ViewParams): void;
+  goBack(): void;
+  goForward(): void;
+  setQueueOpen(open: boolean): void;
+  toggleQueue(): void;
+  setSimilarOpen(open: boolean): void;
+  toggleSimilar(): void;
+  setContentTransitionStyle(style: 'soft' | 'directional' | 'layered'): void;
+  setReduceEffects(reduce: boolean): void;
 }
 
-function isSameView(left: AppView, right: AppView): boolean {
-  if (left.type !== right.type) {
-    return false;
-  }
+export const useUiStore = create<UiState>((set, get) => {
+  const persisted = loadUiState();
 
-  if (left.type === 'playlist' && right.type === 'playlist') {
-    return left.providerId === right.providerId && left.playlistId === right.playlistId;
-  }
+  return {
+    currentView: { name: 'home', params: {} },
+    backStack: [],
+    forwardStack: [],
+    canGoBack: false,
+    canGoForward: false,
+    isQueueOpen: false,
+    isSimilarOpen: false,
+    contentTransitionStyle: persisted.contentTransitionStyle,
+    reduceEffects: persisted.reduceEffects,
+    navigationDirection: 'forward',
 
-  if (left.type === 'recommendationCollection' && right.type === 'recommendationCollection') {
-    return left.providerId === right.providerId && left.collectionId === right.collectionId;
-  }
+    navigateToView(name, params = {}) {
+      const { currentView, backStack } = get();
+      if (currentView.name === name && JSON.stringify(currentView.params) === JSON.stringify(params)) return;
+      set({
+        currentView: { name, params },
+        backStack: [...backStack, currentView].slice(-50),
+        forwardStack: [],
+        canGoBack: true,
+        canGoForward: false,
+        navigationDirection: 'forward'
+      });
+    },
 
-  if (left.type === 'charts' && right.type === 'charts') {
-    return left.providerId === right.providerId;
-  }
+    goBack() {
+      const { backStack, currentView } = get();
+      if (backStack.length === 0) return;
+      const previous = backStack[backStack.length - 1];
+      set({
+        currentView: previous,
+        backStack: backStack.slice(0, -1),
+        forwardStack: [currentView, ...get().forwardStack].slice(0, 50),
+        canGoBack: backStack.length - 1 > 0,
+        canGoForward: true,
+        navigationDirection: 'backward'
+      });
+    },
 
-  if (left.type === 'chart' && right.type === 'chart') {
-    return left.providerId === right.providerId && left.chartId === right.chartId;
-  }
+    goForward() {
+      const { forwardStack, currentView } = get();
+      if (forwardStack.length === 0) return;
+      const next = forwardStack[0];
+      set({
+        currentView: next,
+        forwardStack: forwardStack.slice(1),
+        backStack: [...get().backStack, currentView].slice(-50),
+        canGoBack: true,
+        canGoForward: forwardStack.length - 1 > 0,
+        navigationDirection: 'forward'
+      });
+    },
 
-  if (left.type === 'playlistDiscovery' && right.type === 'playlistDiscovery') {
-    return left.providerId === right.providerId && left.categoryId === right.categoryId;
-  }
+    setQueueOpen(open) {
+      set({ isQueueOpen: open });
+    },
 
-  if (left.type === 'artist' && right.type === 'artist') {
-    return left.providerId === right.providerId && left.artistId === right.artistId;
-  }
+    toggleQueue() {
+      set({ isQueueOpen: !get().isQueueOpen, isSimilarOpen: false });
+    },
 
-  if (left.type === 'album' && right.type === 'album') {
-    return left.providerId === right.providerId && left.albumId === right.albumId;
-  }
+    setSimilarOpen(open) {
+      set({ isSimilarOpen: open });
+    },
 
-  return true;
-}
+    toggleSimilar() {
+      set({ isSimilarOpen: !get().isSimilarOpen, isQueueOpen: false });
+    },
+
+    setContentTransitionStyle(style) {
+      set({ contentTransitionStyle: style });
+      persistUiState({
+        contentTransitionStyle: style,
+        reduceEffects: get().reduceEffects
+      });
+    },
+
+    setReduceEffects(reduce) {
+      set({ reduceEffects: reduce });
+      persistUiState({
+        contentTransitionStyle: get().contentTransitionStyle,
+        reduceEffects: reduce
+      });
+    }
+  };
+});

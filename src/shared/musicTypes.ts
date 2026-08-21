@@ -171,6 +171,16 @@ export interface Playlist {
   isLiked?: boolean;
 }
 
+export interface PlaylistDetail {
+  providerId: ProviderId;
+  playlist: Playlist;
+  tracks: Song[];
+  creatorName?: string;
+  playCount?: number;
+  trackCount?: number;
+  updateLabel?: string;
+}
+
 export interface ChartSummary extends Playlist {
   providerId: RemoteProviderId;
   platformChartId: string;

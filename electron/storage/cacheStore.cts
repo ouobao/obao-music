@@ -111,6 +111,12 @@ function createCacheStore(
       return entry.value as T;
     },
 
+    peek<T>(key: string) {
+      const entry = entries.get(key);
+      if (!entry) return null;
+      return entry.value as T;
+    },
+
     set<T>(key: string, value: T, ttlMs: number) {
       invalidatePendingLoad(key);
       setEntry(key, value, ttlMs);

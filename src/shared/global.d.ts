@@ -6,6 +6,7 @@ import type {
   HomepageBlockFeed,
   Playlist,
   PlaylistCategory,
+  PlaylistDetail,
   PlaylistDiscoveryPage,
   Program,
   ProviderId,
@@ -18,6 +19,8 @@ import type {
   Song
 } from './musicTypes';
 import type {
+  LoginQrPollResult,
+  LoginQrSession,
   LoginStatus,
   LyricsResult,
   PlaylistDiscoveryQuery,
@@ -94,6 +97,9 @@ declare global {
       music: {
         getLoginStatus: (providerId: ProviderId) => Promise<ProviderIpcResult<LoginStatus>>;
         login: (providerId: ProviderId) => Promise<ProviderIpcResult<LoginStatus>>;
+        loginQrCreate: (providerId: ProviderId) => Promise<ProviderIpcResult<LoginQrSession>>;
+        loginQrPoll: (providerId: ProviderId, key: string) => Promise<ProviderIpcResult<LoginQrPollResult>>;
+        loginQrCancel: (providerId: ProviderId, key: string) => Promise<ProviderIpcResult<void>>;
         logout: (providerId: ProviderId) => Promise<ProviderIpcResult<void>>;
         search: (providerId: ProviderId, keyword: string, options?: SearchOptions) => Promise<ProviderIpcResult<Song[]>>;
         getSearchSuggestions: (providerId: RemoteProviderId, keyword: string, options?: SearchSuggestionOptions) => Promise<ProviderIpcResult<SearchSuggestion[]>>;
@@ -101,11 +107,13 @@ declare global {
         searchEntities: (providerId: RemoteProviderId, keyword: string, options?: SearchEntityOptions) => Promise<ProviderIpcResult<SearchEntityResults>>;
         getUserPlaylists: (providerId: ProviderId, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<Playlist[]>>;
         getPlaylistTracks: (providerId: ProviderId, playlistId: string, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<Song[]>>;
+        getPlaylistDetail: (providerId: ProviderId, playlistId: string, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<PlaylistDetail>>;
         getCharts: (providerId: RemoteProviderId, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<ChartSummary[]>>;
         getChartTracks: (providerId: RemoteProviderId, chartId: string, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<Song[]>>;
         getPlaylistCategories: (providerId: RemoteProviderId, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<PlaylistCategory[]>>;
         getDiscoveredPlaylists: (providerId: RemoteProviderId, query: PlaylistDiscoveryQuery, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<PlaylistDiscoveryPage>>;
         getArtistDetail: (providerId: RemoteProviderId, artistId: string, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<ArtistDetail>>;
+        getArtistSongsPage: (providerId: RemoteProviderId, artistId: string, offset: number, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<ArtistSongsPage>>;
         getAlbumDetail: (providerId: RemoteProviderId, albumId: string, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<AlbumDetail>>;
         getRecommendationHome: (providerId: RemoteProviderId, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<RecommendationHomeFeed>>;
         getNewAlbums: (providerId: RemoteProviderId, options?: ProviderFetchOptions) => Promise<ProviderIpcResult<AlbumSummary[]>>;

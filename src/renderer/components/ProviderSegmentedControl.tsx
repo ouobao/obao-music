@@ -1,33 +1,67 @@
-import type { RemoteProviderId } from '../../shared/musicTypes';
+import { useLayoutEffect, useRef, useState } from 'react';
 
-interface ProviderSegmentedControlProps {
-  value: RemoteProviderId;
+interface ProviderSegmentedControlProps<T extends string> {
+  options: { id: T; label: string }[];
+  activeId: T;
+  onChange: (id: T) => void;
   ariaLabel: string;
-  onChange?: (providerId: RemoteProviderId) => void;
+  className?: string;
 }
 
-const providers = [
-  { id: 'qq', label: 'QQ 音乐' },
-  { id: 'netease', label: '网易云音乐' }
-] as const satisfies readonly { id: RemoteProviderId; label: string }[];
+/**
+ * 平台切换分段控件：滑块以弹性缓动在选项间滑动替换原来的生硬背景切换。
+ * 网易云 / QQ 音乐主顶栏与登录弹窗共用。
+ */
+export function ProviderSegmentedControl<T extends string>({
+  options,
+  activeId,
+  onChange,
+  ariaLabel,
+  className
+}: ProviderSegmentedControlProps<T>) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [thumb, setThumb] = useState<{ left: number; width: number } | null>(null);
 
-export function ProviderSegmentedControl({ value, ariaLabel, onChange }: ProviderSegmentedControlProps) {
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const measure = () => {
+      const activeBtn = buttonRefs.current[activeId];
+      if (!activeBtn) return;
+      const containerRect = container.getBoundingClientRect();
+      const btnRect = activeBtn.getBoundingClientRect();
+      setThumb({ left: btnRect.left - containerRect.left, width: btnRect.width });
+    };
+    measure();
+    // 窗口尺寸变化时重新测量（主题/缩放等也可能改变按钮宽度）
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [activeId, options]);
+
   return (
-    <div className="provider-segmented-control" data-provider={value} role="group" aria-label={ariaLabel}>
-      {providers.map((provider) => (
+    <div
+      ref={containerRef}
+      className={`provider-toggle ${className ?? ''}`}
+      role="group"
+      aria-label={ariaLabel}
+    >
+      <span
+        className={`provider-toggle-thumb ${thumb ? 'ready' : ''}`}
+        style={thumb ? { transform: `translateX(${thumb.left}px)`, width: thumb.width } : undefined}
+        aria-hidden="true"
+      />
+      {options.map((option) => (
         <button
-          className={provider.id === value ? 'provider-segmented-option provider-segmented-option-active' : 'provider-segmented-option'}
-          type="button"
-          data-provider-option={provider.id}
-          aria-pressed={provider.id === value}
-          key={provider.id}
-          onClick={() => {
-            if (provider.id !== value) {
-              onChange?.(provider.id);
-            }
-          }}
+          key={option.id}
+          ref={(node) => { buttonRefs.current[option.id] = node; }}
+          className={`provider-btn ${activeId === option.id ? 'active' : ''}`}
+          onClick={() => onChange(option.id)}
+          aria-pressed={activeId === option.id}
+          style={{ zIndex: 1 }}
         >
-          {provider.label}
+          {option.label}
         </button>
       ))}
     </div>

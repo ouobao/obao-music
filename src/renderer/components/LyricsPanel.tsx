@@ -60,7 +60,6 @@ const lyricVirtualEstimatedRowHeight = 62;
 const lyricVirtualOverscanPx = 640;
 const lyricVirtualScrollBucketPx = 96;
 const lyricLongLineThreshold = 192;
-const lyricCharacterChunkSize = 48;
 const transitionInitRetryFrames = 2;
 const transitionWatchdogGraceMs = 900;
 const cursorPollFailureBackoffMs = 1000;
@@ -79,12 +78,9 @@ interface LyricsMediaClockContext {
   durationMs: number;
 }
 
-interface LyricCharacterFillCache {
+interface LyricLineFillCache {
   line: HTMLElement | null;
-  chars: HTMLElement[];
-  activeCharIndex: number;
-  fillPosition: number;
-  initialized: boolean;
+  progress: number;
 }
 
 interface LyricsPanelProps {
@@ -149,14 +145,10 @@ export function LyricsPanel({
   const depthFrameRef = useRef(0);
   const lyricMediaClockFrameRef = useRef(0);
   const lyricMediaClockActiveRef = useRef(false);
-  const lyricCharacterFillCacheRef = useRef<LyricCharacterFillCache>({
+  const lyricLineFillCacheRef = useRef<LyricLineFillCache>({
     line: null,
-    chars: [],
-    activeCharIndex: -1,
-    fillPosition: 0,
-    initialized: false
+    progress: -1
   });
-  const activeCharacterChunkStartRef = useRef(0);
   const chromeIdleTimeoutRef = useRef(0);
   const idleDepthStartTimeoutRef = useRef(0);
   const translationUnavailableTimeoutRef = useRef(0);
@@ -193,7 +185,6 @@ export function LyricsPanel({
   const [fontScale, setFontScale] = useState(readStoredLyricFontScale);
   const [isFontPopoverOpen, setFontPopoverOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
-  const [activeCharacterChunkStart, setActiveCharacterChunkStart] = useState(0);
   const [seekTargetIndex, setSeekTargetIndex] = useState<number | null>(null);
   const [isLyricMediaClockActive, setLyricMediaClockActiveState] = useState(false);
   const [lyricGlowTransition, setLyricGlowTransitionState] = useState<LyricGlowTransition>('flowing');
@@ -395,7 +386,7 @@ export function LyricsPanel({
     const titleEnter = panel.querySelector<HTMLElement>('.lyrics-title-enter');
     const textEnter = panel.querySelector<HTMLElement>('.lyrics-text-enter');
     const linesEnter = panel.querySelector<HTMLElement>('.lyrics-lines-enter');
-    const sourceCover = document.querySelector<HTMLElement>('.cover-thumb-button');
+    const sourceCover = document.querySelector<HTMLElement>('.song-cover-wrapper');
     const edges = flight ? Array.from(flight.querySelectorAll<HTMLElement>('.lyrics-transition-edge')) : [];
     const refractionTargets = [
       panel.querySelector<HTMLElement>('.lyrics-toolbar'),
@@ -475,27 +466,12 @@ export function LyricsPanel({
       playbackPositionRef.current,
       durationMs
     );
-    const nextChunkStart = getActiveLyricChunkStart(currentLines[nextIndex]?.text ?? '', lineProgress);
-    activeCharacterChunkStartRef.current = nextChunkStart;
-    setActiveCharacterChunkStart(nextChunkStart);
     setActiveIndex(nextIndex);
     return true;
   }
 
-  function syncActiveLyricFill(index: number, lineProgress: number) {
-    const currentLine = lyricMediaClockContextRef.current.lines[index];
-    const nextChunkStart = getActiveLyricChunkStart(currentLine?.text ?? '', lineProgress);
-    if (activeCharacterChunkStartRef.current !== nextChunkStart) {
-      syncLyricLineProgress(activeLineRef.current, lineProgress);
-      syncLyricCharacterFill(activeLineRef.current, lineProgress, lyricCharacterFillCacheRef.current);
-      activeCharacterChunkStartRef.current = nextChunkStart;
-      resetLyricCharacterFillCache(lyricCharacterFillCacheRef.current);
-      setActiveCharacterChunkStart(nextChunkStart);
-      return;
-    }
-
-    syncLyricLineProgress(activeLineRef.current, lineProgress);
-    syncLyricCharacterFill(activeLineRef.current, lineProgress, lyricCharacterFillCacheRef.current);
+  function syncActiveLyricFill(_index: number, lineProgress: number) {
+    syncLyricLineProgress(activeLineRef.current, lineProgress, lyricLineFillCacheRef.current);
   }
 
   useLayoutEffect(() => () => invalidateTransitionSession(), []);
@@ -618,7 +594,7 @@ export function LyricsPanel({
             clearEntryTransitionState();
             setTransitionPhase('interactive');
             gsap.set([elements.panel, elements.stage], {
-              clearProps: 'transform,translate,rotate,scale,x,y,z,rotation,rotationX,rotationY'
+              clearProps: 'transform,translate,rotate,scale,x,y,z,rotation,rotationX,rotationY,opacity,visibility'
             });
             gsap.set([elements.coverEnter, elements.titleEnter, elements.textEnter, elements.linesEnter], {
               clearProps: 'transform,translate,rotate,scale,x,y,z,rotation,rotationX,rotationY,opacity,visibility,--lyrics-target-aura-opacity'
@@ -687,17 +663,10 @@ export function LyricsPanel({
               onUnlock: () => updateEntryPhase('unlocking')
             });
           } else {
-            playCoverPortalEntry(
-              timeline,
-              elements,
-              portalGeometry,
-              transitionHoverTimelineRef,
-              transitionGlowTimelineRef,
-              {
-                onHandoff: () => updateEntryPhase('handoff'),
-                onUnlock: () => updateEntryPhase('unlocking')
-              }
-            );
+            playSimpleSlideEntry(timeline, elements, {
+              onHandoff: () => updateEntryPhase('handoff'),
+              onUnlock: () => updateEntryPhase('unlocking')
+            });
           }
           startTransitionWatchdog(sessionId, 'enter', reducedMotion, () => {
             if (transitionDirectionRef.current === 'exit') {
@@ -756,7 +725,7 @@ export function LyricsPanel({
       return;
     }
 
-    resetLyricCharacterFillCache(lyricCharacterFillCacheRef.current);
+    resetLyricLineFillCache(lyricLineFillCacheRef.current);
     const media = mediaRef?.current;
     if (
       media &&
@@ -765,7 +734,7 @@ export function LyricsPanel({
       !media.ended &&
       !media.seeking
     ) {
-      syncLyricCharacterFillFromMedia(media);
+      syncLyricLineFillFromMedia(media);
       return;
     }
 
@@ -785,7 +754,7 @@ export function LyricsPanel({
       durationMs
     );
     syncActiveLyricFill(activeIndex, lineProgress);
-  }, [activeIndex, activeCharacterChunkStart]);
+  }, [activeIndex]);
 
   useEffect(() => usePlayerStore.subscribe((state, previousState) => {
     if (
@@ -811,7 +780,7 @@ export function LyricsPanel({
     }
 
     if (state.playbackSeekRevision !== previousState.playbackSeekRevision) {
-      resetLyricCharacterFillCache(lyricCharacterFillCacheRef.current);
+      resetLyricLineFillCache(lyricLineFillCacheRef.current);
     } else if (
       state.currentSong?.id === previousState.currentSong?.id &&
       lyricGlowTransitionRef.current === 'instant'
@@ -842,7 +811,7 @@ export function LyricsPanel({
         return;
       }
 
-      syncLyricCharacterFillFromMedia(media);
+      syncLyricLineFillFromMedia(media);
     };
 
     const stop = (syncPosition: boolean) => {
@@ -936,7 +905,7 @@ export function LyricsPanel({
       transitionDirectionRef.current = null;
       abortEntryTransitionRef.current = null;
       transitionBusyRef.current = false;
-      restoreTransitionSourceCover(document.querySelector<HTMLElement>('.cover-thumb-button'));
+      restoreTransitionSourceCover(document.querySelector<HTMLElement>('.song-cover-wrapper'));
       window.queueMicrotask(() => {
         if (!lyricsMountedRef.current) {
           void restoreWindowAfterLyrics();
@@ -963,11 +932,13 @@ export function LyricsPanel({
     const handleOutsidePointerDown = (event: PointerEvent) => {
       const target = event.target;
 
-      if (target instanceof Node && sideToolsRef.current?.contains(target)) {
+      // 点击字体弹窗内部不关闭
+      if (target instanceof Node && fontPopoverRef.current?.contains(target)) {
         return;
       }
 
-      if (target instanceof Node && fontPopoverRef.current?.contains(target)) {
+      // 点击字体按钮本身不关闭（按钮自身会 toggle）
+      if (target instanceof Node && fontButtonRef.current?.contains(target)) {
         return;
       }
 
@@ -1429,7 +1400,7 @@ export function LyricsPanel({
             onRestore: () => updateExitPhase('restoring')
           });
         } else {
-          playCoverPortalExit(timeline, elements, portalGeometry, {
+          playSimpleSlideExit(timeline, elements, {
             onReturn: () => updateExitPhase('returning'),
             onRestore: () => updateExitPhase('restoring')
           });
@@ -1456,6 +1427,26 @@ export function LyricsPanel({
     startExitTransition(0);
   });
 
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      if (isFontPopoverOpen) {
+        event.preventDefault();
+        setFontPopoverOpen(false);
+        return;
+      }
+
+      event.preventDefault();
+      closeLyricsPanel();
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [closeLyricsPanel, isFontPopoverOpen]);
+
   return (
     <>
       {typeof document !== 'undefined' ? createPortal(
@@ -1481,7 +1472,7 @@ export function LyricsPanel({
       className="lyrics-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="歌词详情"
+      aria-label="姝岃瘝璇︽儏"
       data-transition-origin={transitionOrigin ? 'player-cover' : 'fallback'}
       data-transition-phase={transitionPhase}
       data-reduce-effects={reduceEffects ? 'true' : 'false'}
@@ -1536,14 +1527,14 @@ export function LyricsPanel({
             <ChevronDown aria-hidden="true" size={20} />
           </button>
           <div className="lyrics-drag-space" aria-hidden="true" />
-          <div className="lyrics-window-controls" aria-label="窗口控制">
-            <button className="window-control-button" type="button" aria-label="最小化窗口" onClick={minimizeWindow}>
+          <div className="lyrics-window-controls" aria-label="绐楀彛鎺у埗">
+            <button className="window-control-button" type="button" aria-label="鏈€灏忓寲绐楀彛" onClick={minimizeWindow}>
               <Minus aria-hidden="true" size={16} />
             </button>
-            <button className="window-control-button" type="button" aria-label="最大化窗口" onClick={toggleLyricsFullscreen}>
+            <button className="window-control-button" type="button" aria-label="鏈€澶у寲绐楀彛" onClick={toggleLyricsFullscreen}>
               <Maximize2 aria-hidden="true" size={15} />
             </button>
-            <button className="window-control-button window-close-button" type="button" aria-label="关闭窗口" onClick={closeWindow}>
+            <button className="window-control-button window-close-button" type="button" aria-label="鍏抽棴绐楀彛" onClick={closeWindow}>
               <X aria-hidden="true" size={16} />
             </button>
           </div>
@@ -1553,7 +1544,7 @@ export function LyricsPanel({
           <button
             className="lyrics-translation-toggle"
             type="button"
-            aria-label={showTranslation ? '隐藏译文' : '显示译文'}
+            aria-label={showTranslation ? '闅愯棌璇戞枃' : '鏄剧ず璇戞枃'}
             aria-pressed={showTranslation}
             data-state={showTranslation ? 'on' : 'off'}
             disabled={!canToggleTranslation}
@@ -1567,13 +1558,13 @@ export function LyricsPanel({
               role="status"
               data-state={translationUnavailablePresence.state}
             >
-              暂无译文
+              鏆傛棤璇戞枃
             </span>
           ) : null}
           <button
             className="lyrics-font-button"
             type="button"
-            aria-label="歌词字号"
+            aria-label="姝岃瘝瀛楀彿"
             aria-expanded={isFontPopoverOpen}
             ref={fontButtonRef}
             onClick={() => setFontPopoverOpen((value) => !value)}
@@ -1584,7 +1575,7 @@ export function LyricsPanel({
             <div
               className="lyrics-font-popover glass-surface"
               role="dialog"
-              aria-label="姝岃瘝瀛楀彿"
+              aria-label="歌词字号"
               data-state={fontPopoverPresence.state}
               ref={fontPopoverRef}
               style={fontPopoverStyle}
@@ -1595,7 +1586,7 @@ export function LyricsPanel({
                 max={lyricFontScaleMax}
                 step={0.01}
                 value={fontScale}
-                aria-label="歌词字号"
+                aria-label="姝岃瘝瀛楀彿"
                 aria-orientation="vertical"
                 surfaceRef={fontPopoverRef}
                 onPointerDown={markLyricFontAdjustment}
@@ -1608,7 +1599,7 @@ export function LyricsPanel({
 
         <section
           className="playback-stage-3d"
-          aria-label="3D 播放舞台"
+          aria-label="3D 鎾斁鑸炲彴"
           ref={stageRef}
           style={stageStyle}
         >
@@ -1756,11 +1747,7 @@ export function LyricsPanel({
   function renderTimedLyricLine(line: (typeof lines)[number], index: number) {
     const isActive = index === activeIndex;
     const lineProgress = isActive ? activeLineProgress : index < activeIndex ? 1 : 0;
-    const characterCount = isActive ? Array.from(line.text).length : 0;
-    const isLongActiveLine = isActive && characterCount > lyricLongLineThreshold;
-    const characterChunkStart = isLongActiveLine
-      ? getActiveLyricChunkStart(line.text, lineProgress, activeCharacterChunkStart)
-      : 0;
+    const isLongActiveLine = isActive && Array.from(line.text).length > lyricLongLineThreshold;
     const lyricDistance = getLyricDistance(index, activeIndex);
     const lyricSignedDistance = getLyricSignedDistance(index, activeIndex);
     const translation = translationsByStartMs.get(line.startMs);
@@ -1787,71 +1774,13 @@ export function LyricsPanel({
         data-lyric-index={index}
         data-lyric-motion={lyricDistance <= 5 ? 'active' : undefined}
         data-timed-lyric="true"
-        data-lyric-character-count={isActive ? characterCount : undefined}
-        data-lyric-character-offset={isActive ? characterChunkStart : undefined}
       >
-        <span className="lyric-line-text">
-          {isActive
-            ? renderActiveLyricCharacters(line.text, lineProgress, characterChunkStart)
-            : line.text}
+        <span className="lyric-line-text" aria-label={line.text}>
+          <span className="lyric-line-text-base">{line.text}</span>
+          <span className="lyric-line-text-fill" aria-hidden="true">{line.text}</span>
         </span>
         {showTranslation && translation ? <span className="lyrics-translation-text">{translation}</span> : null}
       </p>
-    );
-  }
-
-  function renderActiveLyricCharacters(text: string, lineProgress: number, chunkStart: number) {
-    const chars = Array.from(text);
-    const fillPosition = clamp(lineProgress) * chars.length;
-    if (chars.length <= lyricLongLineThreshold) {
-      return createLyricCharacterSegments(text, lineProgress).map(renderLyricCharacterSegment);
-    }
-
-    const chunks = [];
-    for (let start = 0; start < chars.length; start += lyricCharacterChunkSize) {
-      const end = Math.min(chars.length, start + lyricCharacterChunkSize);
-      if (start === chunkStart) {
-        const segments = chars.slice(start, end).map((char, localIndex) => ({
-          char,
-          key: `${start + localIndex}-${char}`,
-          progress: clamp(fillPosition - start - localIndex)
-        }));
-        chunks.push(<Fragment key={`active-${start}`}>{segments.map(renderLyricCharacterSegment)}</Fragment>);
-        continue;
-      }
-
-      const filled = end <= fillPosition;
-      chunks.push(
-        <span
-          className={`lyric-char-chunk${filled ? ' lyric-char-chunk-filled' : ''}`}
-          key={`chunk-${start}`}
-        >
-          {chars.slice(start, end).join('')}
-        </span>
-      );
-    }
-    return chunks;
-  }
-
-  function renderLyricCharacterSegment(segment: ReturnType<typeof createLyricCharacterSegments>[number]) {
-    return (
-      <span
-        className={[
-          'lyric-char',
-          segment.progress > 0 ? 'lyric-char-filled' : '',
-          segment.progress > 0 && segment.progress < 1 ? 'lyric-char-in-progress' : ''
-        ].filter(Boolean).join(' ')}
-        data-lyric-char={segment.char}
-        key={segment.key}
-        style={
-          {
-            '--lyric-char-progress': formatPointer(segment.progress),
-            '--lyric-char-fill': formatProgressPercent(segment.progress)
-          } as DepthStyle
-        }
-      >
-        {segment.char}
-      </span>
     );
   }
 
@@ -2000,7 +1929,7 @@ export function LyricsPanel({
 
     const providerId = currentSong.providerId === 'netease' || currentSong.providerId === 'qq' ? currentSong.providerId : 'qq';
     void finishLyricsClose();
-    navigateToView({ type: 'search' });
+    navigateToView('search', { keyword: primaryArtist });
     void search(providerId, primaryArtist);
   }
 
@@ -2419,7 +2348,7 @@ export function LyricsPanel({
     lyricMediaClockFrameRef.current = 0;
   }
 
-  function syncLyricCharacterFillFromMedia(media: HTMLAudioElement) {
+  function syncLyricLineFillFromMedia(media: HTMLAudioElement) {
     const { lines: currentLines, durationMs } = lyricMediaClockContextRef.current;
     const positionMs = getMediaPositionMs(media);
     const nextIndex = findActiveLyricLine(currentLines, positionMs);
@@ -2594,7 +2523,7 @@ export function getLyricFlowRank(index: number, activeIndex: number, previousAct
 
 function isNoLyricsPlaceholder(input: string) {
   const plainText = input.replace(/\[[^\]]+\]/g, '').replace(/\s+/g, '');
-  return plainText.includes('没有填词') && plainText.includes('口白');
+  return plainText.includes('娌℃湁濉瘝') && plainText.includes('鍙ｇ櫧');
 }
 
 function formatProgressPercent(progress: number) {
@@ -2602,125 +2531,30 @@ function formatProgressPercent(progress: number) {
   return `${Math.round(percent * 100) / 100}%`;
 }
 
-function createLyricCharacterSegments(text: string, lineProgress: number) {
-  const chars = Array.from(text);
-  const fillPosition = clamp(lineProgress) * chars.length;
-
-  return chars.map((char, index) => ({
-    char,
-    key: `${index}-${char}`,
-    progress: clamp(fillPosition - index)
-  }));
-}
-
-function getActiveLyricChunkStart(text: string, lineProgress: number, preferredStart?: number) {
-  const characterCount = Array.from(text).length;
-  if (characterCount <= lyricLongLineThreshold) {
-    return 0;
-  }
-
-  const fillPosition = clamp(lineProgress) * characterCount;
-  const activeCharacterIndex = Math.min(
-    characterCount - 1,
-    Math.max(0, Math.ceil(fillPosition) - 1)
-  );
-  const chunkStart = Math.floor(activeCharacterIndex / lyricCharacterChunkSize) * lyricCharacterChunkSize;
-  return preferredStart === chunkStart ? preferredStart : chunkStart;
-}
-
-function resetLyricCharacterFillCache(cache: LyricCharacterFillCache) {
+function resetLyricLineFillCache(cache: LyricLineFillCache) {
   cache.line = null;
-  cache.chars = [];
-  cache.activeCharIndex = -1;
-  cache.fillPosition = 0;
-  cache.initialized = false;
+  cache.progress = -1;
 }
 
-function syncLyricCharacterFill(line: HTMLElement | null, lineProgress: number, cache: LyricCharacterFillCache) {
+function syncLyricLineProgress(line: HTMLElement | null, progress: number, cache?: LyricLineFillCache) {
   if (!line) {
-    resetLyricCharacterFillCache(cache);
+    if (cache) resetLyricLineFillCache(cache);
     return;
   }
 
-  if (cache.line !== line) {
-    cache.line = line;
-    cache.chars = Array.from(line.querySelectorAll<HTMLElement>('.lyric-char'));
-    cache.activeCharIndex = -1;
-    cache.initialized = false;
-  }
-
-  const { chars } = cache;
-  const totalCharacterCount = readPositiveInteger(line.dataset.lyricCharacterCount) || chars.length;
-  const characterOffset = readPositiveInteger(line.dataset.lyricCharacterOffset, true);
-  const fillPosition = clamp(lineProgress) * totalCharacterCount - characterOffset;
-  const activeCharIndex = getActiveLyricCharacterIndex(fillPosition, chars.length);
-  if (!cache.initialized) {
-    chars.forEach((char, index) => {
-      syncLyricCharacter(char, clamp(fillPosition - index));
-    });
-  } else {
-    const previousActiveCharIndex = cache.activeCharIndex;
-    const firstChangedIndex = Math.max(0, Math.min(previousActiveCharIndex, activeCharIndex));
-    const lastChangedIndex = Math.min(chars.length - 1, Math.max(previousActiveCharIndex, activeCharIndex));
-
-    if (lastChangedIndex >= firstChangedIndex) {
-      for (let index = firstChangedIndex; index <= lastChangedIndex; index += 1) {
-        syncLyricCharacter(chars[index], clamp(fillPosition - index));
-      }
-    } else if (activeCharIndex >= 0) {
-      syncLyricCharacter(chars[activeCharIndex], clamp(fillPosition - activeCharIndex));
-    }
-  }
-
-  cache.activeCharIndex = activeCharIndex;
-  cache.fillPosition = fillPosition;
-  cache.initialized = true;
-}
-
-function readPositiveInteger(value: string | undefined, allowZero = false) {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 0 || (!allowZero && parsed === 0)) {
-    return 0;
-  }
-  return parsed;
-}
-
-function getActiveLyricCharacterIndex(fillPosition: number, characterCount: number) {
-  if (fillPosition <= 0 || characterCount === 0) {
-    return -1;
-  }
-
-  return Math.min(characterCount - 1, Math.ceil(fillPosition) - 1);
-}
-
-function syncLyricCharacter(char: HTMLElement | undefined, progress: number) {
-  if (!char) {
+  const safeProgress = clamp(progress);
+  if (cache && cache.line === line && Math.abs(cache.progress - safeProgress) < 0.0001) {
     return;
   }
 
-  const progressValue = formatPointer(progress);
-  const fillValue = formatProgressPercent(progress);
-  if (char.style.getPropertyValue('--lyric-char-progress') !== progressValue) {
-    char.style.setProperty('--lyric-char-progress', progressValue);
-  }
-  if (char.style.getPropertyValue('--lyric-char-fill') !== fillValue) {
-    char.style.setProperty('--lyric-char-fill', fillValue);
-  }
-
-  const isFilled = progress > 0;
-  const isInProgress = progress > 0 && progress < 1;
-  if (char.classList.contains('lyric-char-filled') !== isFilled) {
-    char.classList.toggle('lyric-char-filled', isFilled);
-  }
-  if (char.classList.contains('lyric-char-in-progress') !== isInProgress) {
-    char.classList.toggle('lyric-char-in-progress', isInProgress);
-  }
-}
-
-function syncLyricLineProgress(line: HTMLElement | null, progress: number) {
-  const value = formatProgressPercent(progress);
-  if (line && line.style.getPropertyValue('--lyric-line-progress') !== value) {
+  const value = formatProgressPercent(safeProgress);
+  if (line.style.getPropertyValue('--lyric-line-progress') !== value) {
     line.style.setProperty('--lyric-line-progress', value);
+  }
+
+  if (cache) {
+    cache.line = line;
+    cache.progress = safeProgress;
   }
 }
 
@@ -2824,7 +2658,7 @@ function resolveTransitionOrigin(origin: LyricsTransitionOrigin | null) {
     return origin;
   }
 
-  const playerCover = document.querySelector<HTMLElement>('.cover-thumb-button');
+  const playerCover = document.querySelector<HTMLElement>('.song-cover-wrapper');
   const playerCoverRect = playerCover?.getBoundingClientRect();
 
   if (playerCoverRect && playerCoverRect.width > 0 && playerCoverRect.height > 0) {
@@ -2835,7 +2669,7 @@ function resolveTransitionOrigin(origin: LyricsTransitionOrigin | null) {
 }
 
 function resolveCurrentTransitionOrigin(fallbackOrigin: LyricsTransitionOrigin | null) {
-  const playerCover = document.querySelector<HTMLElement>('.cover-thumb-button');
+  const playerCover = document.querySelector<HTMLElement>('.song-cover-wrapper');
   const playerCoverRect = playerCover?.getBoundingClientRect();
 
   if (playerCoverRect && playerCoverRect.width > 0 && playerCoverRect.height > 0) {
@@ -2974,52 +2808,6 @@ function createLyricsPortalGeometry(origin: LyricsTransitionOrigin, target: Cove
   };
 }
 
-function setPortalFlightGeometry(elements: LyricsTransitionElements, geometry: LyricsPortalGeometry) {
-  gsap.set(elements.flight, {
-    width: geometry.targetWidth,
-    height: geometry.targetHeight,
-    x: geometry.flightStartPoint.x,
-    y: geometry.flightStartPoint.y,
-    scale: geometry.flightStartScale,
-    rotation: 0,
-    rotationX: 0,
-    rotationY: 0,
-    '--flight-radius': `${7 / geometry.flightStartScale}px`,
-    '--flight-border': `${1 / geometry.flightStartScale}px`,
-    autoAlpha: 1
-  });
-}
-
-function setPortalRippleGeometry(elements: LyricsTransitionElements, geometry: LyricsPortalGeometry) {
-  gsap.set(elements.ripple, {
-    '--ripple-x': `${geometry.targetCenter.x}px`,
-    '--ripple-y': `${geometry.targetCenter.y}px`,
-    '--ripple-radius': `${geometry.rippleStartRadius}px`,
-    autoAlpha: 1
-  });
-}
-
-function startTransitionHoverLoops(
-  elements: LyricsTransitionElements,
-  motionScale: number,
-  hoverRef: { current: gsap.core.Timeline | null },
-  glowRef: { current: gsap.core.Timeline | null }
-) {
-  stopTransitionHoverLoops(hoverRef, glowRef);
-  hoverRef.current = gsap.timeline({ repeat: -1, yoyo: true }).to(elements.bob, {
-    y: -9,
-    z: 112,
-    rotationX: -7.5,
-    rotationY: 8,
-    rotation: -1.2,
-    duration: 0.92 * motionScale,
-    ease: 'sine.inOut'
-  });
-  glowRef.current = gsap.timeline({ repeat: -1, yoyo: true })
-    .to(elements.glow, { scale: 1.12, autoAlpha: 0.52, duration: 1.06 * motionScale, ease: 'sine.inOut' })
-    .to(elements.shadow, { scale: 0.92, autoAlpha: 0.68, duration: 1.06 * motionScale, ease: 'sine.inOut' }, '<');
-}
-
 function stopTransitionHoverLoops(
   hoverRef: { current: gsap.core.Timeline | null },
   glowRef: { current: gsap.core.Timeline | null }
@@ -3076,22 +2864,18 @@ function playReducedMotionExit(
     .to(elements.appVignette, { autoAlpha: 0, duration: 0.12 }, duration);
 }
 
-function playCoverPortalEntry(
+/**
+ * 新版歌词页转场：简单的整页推拉。
+ * 面板从底部推入，内容随进度淡入上浮；不使用封面飞行卡、光晕与轨道层。
+ */
+function playSimpleSlideEntry(
   timeline: gsap.core.Timeline,
   elements: LyricsTransitionElements,
-  geometry: LyricsPortalGeometry,
-  hoverRef: { current: gsap.core.Timeline | null },
-  glowRef: { current: gsap.core.Timeline | null },
   callbacks: LyricsEntryPhaseCallbacks
 ) {
   const duration = getLyricsTransitionDuration('enter', false) / 1000;
-  const motionScale = duration / 4.32;
-  const t = (seconds: number) => seconds * motionScale;
-  const at = (label: string, seconds: number) => `${label}+=${t(seconds)}`;
-  setPortalFlightGeometry(elements, geometry);
 
   timeline
-    .addLabel('lift', 0)
     .set([
       elements.stage,
       elements.coverEnter,
@@ -3100,268 +2884,45 @@ function playCoverPortalEntry(
       elements.linesEnter,
       elements.toolbar,
       elements.sideTools
-    ], { autoAlpha: 0 }, 'lift')
-    .set(elements.panel, { autoAlpha: 1, yPercent: 100 }, 'lift')
-    .set(elements.sourceCover ? [elements.sourceCover] : [], { autoAlpha: 0 }, 'lift+=0.02')
-    .to(elements.backdrop, { autoAlpha: 1, duration: t(0.24), ease: 'power2.out' }, 'lift')
+    ], { autoAlpha: 0 }, 0)
+    .set(elements.panel, { autoAlpha: 1, yPercent: 100 }, 0)
+    .call(callbacks.onHandoff, [], 0)
+    .to(elements.backdrop, { autoAlpha: 1, duration: duration * 0.5, ease: 'power2.out' }, 0)
+    .to(elements.panel, { yPercent: 0, duration, ease: 'power3.out' }, 0)
+    .to(elements.stage, { autoAlpha: 1, duration: duration * 0.24, ease: 'power2.out' }, duration * 0.26)
     .fromTo(
-      elements.bob,
-      { filter: 'blur(8px)', scale: 1, y: 0, z: 0, rotationX: 0, rotationY: 0 },
-      {
-        filter: 'blur(0px)',
-        scale: 1.08,
-        y: -22,
-        z: 92,
-        rotationX: -8,
-        rotationY: 9,
-        duration: t(0.75),
-        ease: 'power3.out'
-      },
-      'lift'
+      [elements.coverEnter, elements.titleEnter, elements.textEnter, elements.linesEnter],
+      { autoAlpha: 0, y: 26 },
+      { autoAlpha: 1, y: 0, duration: duration * 0.42, ease: 'power3.out' },
+      duration * 0.36
     )
-    .to(elements.flight, {
-      x: geometry.floatPoint.x,
-      y: geometry.floatPoint.y,
-      scale: geometry.flightStartScale * 1.12,
-      duration: t(0.75),
-      ease: 'power3.out'
-    }, 'lift')
-    .to(elements.glow, { autoAlpha: 0.42, scale: 1.02, duration: t(0.58), ease: 'power2.out' }, 'lift+=0.12')
-    .to(elements.shadow, { autoAlpha: 0.58, scale: 0.88, duration: t(0.56), ease: 'power2.out' }, 'lift+=0.12')
-    .call(() => startTransitionHoverLoops(elements, motionScale, hoverRef, glowRef), [], t(0.72))
-    .addLabel('defocus', t(0.58))
-    .fromTo(
-      elements.appVignette,
-      { autoAlpha: 0, '--app-blur': '0px' },
-      { autoAlpha: 1, '--app-blur': '24px', duration: t(0.34), ease: 'power2.inOut' },
-      'defocus'
-    )
-    .addLabel('drawer', t(1.34))
-    .set([elements.coverEnter, elements.titleEnter, elements.textEnter, elements.linesEnter], { autoAlpha: 0 }, 'drawer')
-    .to(elements.panel, { yPercent: 0, duration: t(0.72), ease: 'power4.out' }, 'drawer')
-    .to(elements.stage, { autoAlpha: 1, duration: t(0.24), ease: 'power2.out' }, 'drawer+=0.08')
-    .to([elements.titleEnter, elements.textEnter, elements.linesEnter], {
+    .to([elements.toolbar, elements.sideTools], {
       autoAlpha: 1,
-      y: 0,
-      duration: t(0.46),
-      ease: 'power3.out'
-    }, 'drawer+=0.1')
-    .to(elements.appVignette, { autoAlpha: 0, '--app-blur': '0px', duration: t(0.18), ease: 'power1.out' }, t(2.08))
-    .addLabel('flight', t(2.14))
-    .call(() => stopTransitionHoverLoops(hoverRef, glowRef), [], 'flight')
-    .to(elements.bob, {
-      y: 0,
-      z: 108,
-      scale: 1,
-      rotationX: 0,
-      rotationY: 0,
-      rotation: 0,
-      duration: t(0.2),
+      duration: duration * 0.32,
       ease: 'power2.out'
-    }, 'flight')
-    .to(elements.flight, {
-      x: geometry.targetPoint.x,
-      y: geometry.targetPoint.y,
-      scale: 1,
-      rotation: 0,
-      '--flight-radius': '8px',
-      '--flight-border': '1px',
-      duration: t(0.8),
-      ease: 'power3.inOut'
-    }, 'flight+=0.06')
-    .to(elements.bob, { rotationY: 360, duration: t(0.8), ease: 'power3.inOut' }, 'flight+=0.06')
-    .to(elements.glow, { scale: 1.18, autoAlpha: 0.58, duration: t(0.5), ease: 'sine.inOut' }, 'flight+=0.08')
-    .addLabel('dock', t(3.0))
-    .set(elements.bob, { rotationY: 0 }, 'dock')
-    .to(elements.bob, {
-      y: -6,
-      z: 24,
-      rotationX: -7,
-      rotationY: 5,
-      rotation: -0.8,
-      scaleX: 1.02,
-      scaleY: 0.94,
-      duration: t(0.28),
-      ease: 'power3.in'
-    }, 'dock')
-    .to(elements.bob, {
-      y: 9,
-      z: -18,
-      rotationX: 14,
-      rotationY: -5,
-      rotation: -1.6,
-      scaleX: 1.08,
-      scaleY: 0.82,
-      duration: t(0.14),
-      ease: 'power4.in'
-    }, at('dock', 0.24))
-    .to(elements.bob, {
-      y: 0,
-      z: 0,
-      rotationX: 0,
-      rotationY: 0,
-      rotation: 0,
-      scaleX: 1,
-      scaleY: 1,
-      duration: t(0.34),
-      ease: 'back.out(1.4)'
-    }, at('dock', 0.42))
-    .fromTo(elements.edges[0], { autoAlpha: 0, rotationX: 0, z: 0 }, { autoAlpha: 0.92, rotationX: -12, z: 18, duration: t(0.18), ease: 'power2.out' }, 'dock+=0.08')
-    .fromTo(elements.edges[1], { autoAlpha: 0, rotationY: 0, z: 0 }, { autoAlpha: 0.82, rotationY: 11, z: 16, duration: t(0.2), ease: 'power2.out' }, 'dock+=0.11')
-    .fromTo(elements.edges[2], { autoAlpha: 0, rotationX: 0, z: 0 }, { autoAlpha: 0.86, rotationX: 13, z: 20, duration: t(0.2), ease: 'power2.out' }, 'dock+=0.13')
-    .fromTo(elements.edges[3], { autoAlpha: 0, rotationY: 0, z: 0 }, { autoAlpha: 0.78, rotationY: -10, z: 15, duration: t(0.18), ease: 'power2.out' }, 'dock+=0.15')
-    .to(elements.edges, { rotationX: 0, rotationY: 0, z: 0, autoAlpha: 0, duration: t(0.26), ease: 'power2.in' }, at('dock', 0.48))
-    .call(() => {
-      applyDepthStyle(elements.stage, centerPointer);
-      setPortalRippleGeometry(elements, geometry);
-      gsap.set(elements.refractionTargets, { filter: 'url(#lyricsWaterRippleFilter)' });
-      gsap.set(elements.displacement, { attr: { scale: 0 } });
-    }, [], at('dock', 0.24))
-    .to(elements.ripple, {
-      '--ripple-radius': `${geometry.rippleRadius}px`,
-      autoAlpha: 0,
-      duration: t(1.7),
-      ease: 'power2.out'
-    }, at('dock', 0.24))
-    .to(elements.displacement, { attr: { scale: 18 }, duration: t(0.12), ease: 'power2.out' }, at('dock', 0.24))
-    .to(elements.displacement, { attr: { scale: 0 }, duration: t(1.2), ease: 'sine.inOut' }, at('dock', 0.34))
-    .call(() => {
-      gsap.set(elements.refractionTargets, { filter: 'none' });
-      gsap.set(elements.displacement, { attr: { scale: 0 } });
-    }, [], at('dock', 1.62))
-    .to(elements.glow, { scale: 0.62, autoAlpha: 0.3, duration: t(0.56), ease: 'power2.inOut' }, at('dock', 0.24))
-    .addLabel('handoff', t(3.8))
-    .call(callbacks.onHandoff, [], 'handoff')
-    .call(callbacks.onUnlock, [], 'handoff+=0.02')
-    .to(elements.glow, { autoAlpha: 0, duration: t(0.52), ease: 'power2.inOut' }, 'handoff')
-    .to(elements.coverEnter, {
-      autoAlpha: 1,
-      '--lyrics-target-aura-opacity': 0.42,
-      duration: t(0.52),
-      ease: 'power2.out'
-    }, 'handoff')
-    .to(elements.flight, { autoAlpha: 0, duration: t(0.52), ease: 'power2.inOut' }, 'handoff')
-    .to(elements.sourceCover ? [elements.sourceCover] : [], { autoAlpha: 1, duration: t(0.3), ease: 'power2.out' }, 'handoff')
-    .fromTo(
-      elements.toolbar,
-      { autoAlpha: 0, y: -30 },
-      { autoAlpha: 1, y: 0, duration: t(0.52), ease: 'power3.out' },
-      'handoff'
-    )
-    .fromTo(
-      elements.sideTools,
-      { autoAlpha: 0, x: 22 },
-      { autoAlpha: 1, x: 0, duration: t(0.48), ease: 'power3.out' },
-      'handoff+=0.04'
-    )
-    .to(elements.panel, { yPercent: 0, duration: t(0.01) }, 'handoff');
+    }, duration * 0.52)
+    .call(callbacks.onUnlock, [], duration * 0.55);
 }
 
-function playCoverPortalExit(
+/** 与进入对应的推拉退出：内容先淡出下沉，面板整体推回底部。 */
+function playSimpleSlideExit(
   timeline: gsap.core.Timeline,
   elements: LyricsTransitionElements,
-  geometry: LyricsPortalGeometry,
   callbacks: LyricsExitPhaseCallbacks
 ) {
   const duration = getLyricsTransitionDuration('exit', false) / 1000;
-  const motionScale = duration / 1.92;
-  const t = (seconds: number) => seconds * motionScale;
-  const at = (label: string, seconds: number) => `${label}+=${t(seconds)}`;
-  gsap.set(elements.flight, {
-    width: geometry.targetWidth,
-    height: geometry.targetHeight,
-    x: geometry.targetPoint.x,
-    y: geometry.targetPoint.y,
-    scale: 1,
-    rotation: 0,
-    rotationX: 0,
-    rotationY: 0,
-    '--flight-radius': '8px',
-    '--flight-border': '1px',
-    autoAlpha: 0
-  });
-  gsap.set(elements.bob, {
-    x: 0,
-    y: 0,
-    z: 0,
-    scale: 1,
-    rotation: 0,
-    rotationX: 0,
-    rotationY: 0,
-    filter: 'blur(0px)'
-  });
 
   timeline
-    // Keep the lyric chrome inside the drawer until the panel carries it offscreen.
-    .addLabel('defocus', 0)
+    .to([elements.toolbar, elements.sideTools], { autoAlpha: 0, duration: duration * 0.34, ease: 'power1.in' }, 0)
     .fromTo(
-      elements.appVignette,
-      { autoAlpha: 0, '--app-blur': '0px' },
-      { autoAlpha: 1, '--app-blur': '24px', duration: t(0.34), ease: 'power2.inOut' },
-      'defocus'
+      [elements.coverEnter, elements.titleEnter, elements.textEnter, elements.linesEnter],
+      { autoAlpha: 1, y: 0 },
+      { autoAlpha: 0, y: 20, duration: duration * 0.42, ease: 'power2.in' },
+      0
     )
-    .to(elements.stage, {
-      ...createDepthStyle(centerPointer),
-      duration: t(0.32),
-      ease: 'power2.inOut'
-    }, 'defocus')
-    .to(elements.coverEnter, {
-      '--lyrics-target-aura-opacity': 0,
-      duration: t(0.32),
-      ease: 'power2.inOut'
-    }, 'defocus')
-    .addLabel('handoff', t(0.32))
-    .call(() => applyDepthStyle(elements.stage, centerPointer), [], 'handoff')
-    .call(callbacks.onReturn, [], 'handoff')
-    .set(elements.sourceCover ? [elements.sourceCover] : [], { autoAlpha: 0 }, 'handoff')
-    .set(elements.coverEnter, { autoAlpha: 0 }, 'handoff')
-    .set(elements.flight, { autoAlpha: 1 }, 'handoff')
-    .set(elements.glow, { autoAlpha: 0.3, scale: 0.62 }, 'handoff')
-    .set(elements.shadow, { autoAlpha: 0.36, scale: 0.82 }, 'handoff')
-    .addLabel('returnFlight', t(0.32))
-    .to(elements.flight, {
-      x: geometry.flightStartPoint.x,
-      y: geometry.flightStartPoint.y,
-      scale: geometry.flightStartScale,
-      rotation: 0,
-      '--flight-radius': `${7 / geometry.flightStartScale}px`,
-      '--flight-border': `${1 / geometry.flightStartScale}px`,
-      duration: t(1.1),
-      ease: 'power3.inOut'
-    }, 'returnFlight')
-    .to(elements.bob, { rotationY: 360, duration: t(1.1), ease: 'power3.inOut' }, 'returnFlight')
-    .to(elements.glow, { scale: 1.12, autoAlpha: 0.52, duration: t(0.62), ease: 'sine.inOut' }, 'returnFlight')
-    .addLabel('drawerDown', t(0.58))
-    .to(elements.panel, { yPercent: 100, duration: t(1.12), ease: 'power4.inOut' }, 'drawerDown')
-    .addLabel('dock', t(1.42))
-    .to(elements.bob, {
-      y: 2,
-      z: -6,
-      rotationX: 3,
-      rotation: -0.3,
-      scaleX: 1.02,
-      scaleY: 0.96,
-      duration: t(0.1),
-      ease: 'power2.in'
-    }, 'dock')
-    .to(elements.bob, {
-      y: 0,
-      z: 0,
-      rotationX: 0,
-      rotationY: 360,
-      rotation: 0,
-      scaleX: 1,
-      scaleY: 1,
-      duration: t(0.18),
-      ease: 'power2.out'
-    }, at('dock', 0.1))
-    .to([elements.glow, elements.shadow], { autoAlpha: 0, duration: t(0.28), ease: 'power2.inOut' }, 'dock')
-    .to(elements.appVignette, { autoAlpha: 0, '--app-blur': '0px', duration: t(0.28), ease: 'power2.inOut' }, 'dock')
-    .addLabel('playerHandoff', t(1.7))
-    .set(elements.sourceCover ? [elements.sourceCover] : [], { autoAlpha: 1 }, 'playerHandoff')
-    .set(elements.flight, { autoAlpha: 0 }, 'playerHandoff')
-    .set(elements.bob, { rotationY: 0 }, 'playerHandoff')
-    .call(callbacks.onRestore, [], at('playerHandoff', 0.22));
+    .to(elements.panel, { yPercent: 100, duration, ease: 'power3.inOut' }, duration * 0.14)
+    .call(callbacks.onReturn, [], duration * 0.5)
+    .call(callbacks.onRestore, [], Math.max(duration - 0.04, duration * 0.9));
 }
 
 function createDepthStyle(pointer: typeof centerPointer): DepthStyle {

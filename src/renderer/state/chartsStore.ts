@@ -1,193 +1,124 @@
 import { create } from 'zustand';
 import type { ChartSummary, RemoteProviderId, Song } from '../../shared/musicTypes';
-import type { ProviderFetchOptions } from '../../shared/providerTypes';
+import type { LoadStatus } from './loadStatus';
 
-interface ChartsState {
-  chartsByProvider: Record<RemoteProviderId, ChartSummary[]>;
-  chartTracksById: Record<string, Song[]>;
-  isLoadingByProvider: Record<RemoteProviderId, boolean>;
-  errorMessageByProvider: Record<RemoteProviderId, string | null>;
-  loadedByProvider: Record<RemoteProviderId, boolean>;
-  isLoadingByChartId: Record<string, boolean>;
-  errorMessageByChartId: Record<string, string | null>;
-  loadedChartIds: Record<string, boolean>;
-  lastProviderId: RemoteProviderId | null;
-  loadCharts: (providerId: RemoteProviderId, options?: ProviderFetchOptions) => Promise<ChartSummary[]>;
-  loadChartTracks: (providerId: RemoteProviderId, chartId: string, options?: ProviderFetchOptions) => Promise<Song[]>;
-  setLastProviderId: (providerId: RemoteProviderId) => void;
-  resetForTest: () => void;
+export interface ChartsState {
+  chartsByProvider: Record<string, ChartSummary[]>;
+  chartTracksByKey: Record<string, Song[]>;
+  isLoadingByProvider: Record<string, boolean>;
+  errorByProvider: Record<string, string | null>;
+  statusByProvider: Record<string, LoadStatus>;
+  statusByKey: Record<string, LoadStatus>;
+  loadedAtByProvider: Record<string, number>;
+  loadedAtByKey: Record<string, number>;
+  lastProviderId: RemoteProviderId;
+
+  loadCharts(providerId: RemoteProviderId): Promise<void>;
+  loadChartTracks(providerId: RemoteProviderId, chartId: string): Promise<void>;
+  setLastProvider(providerId: RemoteProviderId): void;
 }
 
-const CHARTS_PROVIDER_STORAGE_KEY = 'musicplayer.charts-provider';
+const TTL_MS = 10 * 60 * 1000;
+const revisionByKey: Record<string, number> = {};
 
 export const useChartsStore = create<ChartsState>((set, get) => ({
-  ...createChartsDataState(readStoredProviderId()),
+  chartsByProvider: {},
+  chartTracksByKey: {},
+  isLoadingByProvider: {},
+  errorByProvider: {},
+  statusByProvider: {},
+  statusByKey: {},
+  loadedAtByProvider: {},
+  loadedAtByKey: {},
+  lastProviderId: 'netease',
 
-  loadCharts: async (providerId, options) => {
-    const currentState = get();
-    if (!options?.forceRefresh && currentState.loadedByProvider[providerId]) {
-      return currentState.chartsByProvider[providerId];
-    }
-
+  async loadCharts(providerId) {
+    const key = providerId;
+    const loadedAt = get().loadedAtByProvider[key];
+    if (loadedAt && Date.now() - loadedAt < TTL_MS) return;
+    const revision = (revisionByKey[key] = (revisionByKey[key] ?? 0) + 1);
+    const hasData = Boolean(get().chartsByProvider[providerId]?.length);
     set((state) => ({
-      isLoadingByProvider: {
-        ...state.isLoadingByProvider,
-        [providerId]: true
-      },
-      errorMessageByProvider: {
-        ...state.errorMessageByProvider,
-        [providerId]: null
-      }
+      isLoadingByProvider: { ...state.isLoadingByProvider, [providerId]: true },
+      statusByProvider: { ...state.statusByProvider, [providerId]: hasData ? 'refreshing' : 'loading' }
     }));
 
-    const result = options
-      ? await window.musicPlayer.music.getCharts(providerId, options)
-      : await window.musicPlayer.music.getCharts(providerId);
-    if (!result.ok) {
+    try {
+      const result = await window.musicPlayer.music.getCharts(providerId);
+      if (revision !== revisionByKey[key]) return;
+      if (result.ok) {
+        const charts = result.data;
+        set((state) => ({
+          chartsByProvider: { ...state.chartsByProvider, [providerId]: charts },
+          errorByProvider: { ...state.errorByProvider, [providerId]: null },
+          statusByProvider: {
+            ...state.statusByProvider,
+            [providerId]: charts.length > 0 ? 'success' : 'success-empty'
+          },
+          loadedAtByProvider: { ...state.loadedAtByProvider, [providerId]: Date.now() }
+        }));
+      } else {
+        set((state) => ({
+          errorByProvider: { ...state.errorByProvider, [providerId]: result.error.message },
+          statusByProvider: { ...state.statusByProvider, [providerId]: 'error' }
+        }));
+      }
+    } catch (error) {
+      if (revision !== revisionByKey[key]) return;
       set((state) => ({
-        isLoadingByProvider: {
-          ...state.isLoadingByProvider,
-          [providerId]: false
+        errorByProvider: {
+          ...state.errorByProvider,
+          [providerId]: error instanceof Error ? error.message : String(error)
         },
-        errorMessageByProvider: {
-          ...state.errorMessageByProvider,
-          [providerId]: result.error.message
-        }
+        statusByProvider: { ...state.statusByProvider, [providerId]: 'error' }
       }));
-      return [];
-    }
-
-    set((state) => ({
-      chartsByProvider: {
-        ...state.chartsByProvider,
-        [providerId]: result.data
-      },
-      isLoadingByProvider: {
-        ...state.isLoadingByProvider,
-        [providerId]: false
-      },
-      errorMessageByProvider: {
-        ...state.errorMessageByProvider,
-        [providerId]: null
-      },
-      loadedByProvider: {
-        ...state.loadedByProvider,
-        [providerId]: true
+    } finally {
+      if (revision === revisionByKey[key]) {
+        set((state) => ({ isLoadingByProvider: { ...state.isLoadingByProvider, [providerId]: false } }));
       }
-    }));
-    return result.data;
+    }
   },
 
-  loadChartTracks: async (providerId, chartId, options) => {
-    const currentState = get();
-    if (!options?.forceRefresh && currentState.loadedChartIds[chartId]) {
-      return currentState.chartTracksById[chartId] ?? [];
-    }
+  async loadChartTracks(providerId, chartId) {
+    const key = `${providerId}:${chartId}`;
+    const loadedAt = get().loadedAtByKey[key];
+    if (loadedAt && Date.now() - loadedAt < TTL_MS) return;
+    const current = get().statusByKey[key];
+    if (current === 'loading' || current === 'refreshing') return;
+    const revision = (revisionByKey[key] = (revisionByKey[key] ?? 0) + 1);
+    const hasData = Boolean(get().chartTracksByKey[key]?.length);
+    set((state) => ({ statusByKey: { ...state.statusByKey, [key]: hasData ? 'refreshing' : 'loading' } }));
 
-    set((state) => ({
-      isLoadingByChartId: {
-        ...state.isLoadingByChartId,
-        [chartId]: true
-      },
-      errorMessageByChartId: {
-        ...state.errorMessageByChartId,
-        [chartId]: null
+    try {
+      const result = await window.musicPlayer.music.getChartTracks(providerId, chartId);
+      if (revision !== revisionByKey[key]) return;
+      if (result.ok) {
+        const tracks = result.data;
+        set((state) => ({
+          chartTracksByKey: { ...state.chartTracksByKey, [key]: tracks },
+          statusByKey: { ...state.statusByKey, [key]: tracks.length > 0 ? 'success' : 'success-empty' },
+          loadedAtByKey: { ...state.loadedAtByKey, [key]: Date.now() }
+        }));
+      } else {
+        set((state) => ({ statusByKey: { ...state.statusByKey, [key]: 'error' } }));
       }
-    }));
-
-    const result = options
-      ? await window.musicPlayer.music.getChartTracks(providerId, chartId, options)
-      : await window.musicPlayer.music.getChartTracks(providerId, chartId);
-    if (!result.ok) {
-      set((state) => ({
-        isLoadingByChartId: {
-          ...state.isLoadingByChartId,
-          [chartId]: false
-        },
-        errorMessageByChartId: {
-          ...state.errorMessageByChartId,
-          [chartId]: result.error.message
-        }
-      }));
-      return [];
-    }
-
-    set((state) => ({
-      chartTracksById: {
-        ...state.chartTracksById,
-        [chartId]: result.data
-      },
-      isLoadingByChartId: {
-        ...state.isLoadingByChartId,
-        [chartId]: false
-      },
-      errorMessageByChartId: {
-        ...state.errorMessageByChartId,
-        [chartId]: null
-      },
-      loadedChartIds: {
-        ...state.loadedChartIds,
-        [chartId]: true
+    } catch (error) {
+      if (revision !== revisionByKey[key]) return;
+      set((state) => ({ statusByKey: { ...state.statusByKey, [key]: 'error' } }));
+    } finally {
+      if (revision === revisionByKey[key]) {
+        set((state) => {
+          const currentStatus = state.statusByKey[key];
+          if (currentStatus === 'loading' || currentStatus === 'refreshing') {
+            return { statusByKey: { ...state.statusByKey, [key]: 'error' } };
+          }
+          return state;
+        });
       }
-    }));
-    return result.data;
+    }
   },
 
-  setLastProviderId: (lastProviderId) => {
-    set({ lastProviderId });
-    writeStoredProviderId(lastProviderId);
-  },
-
-  resetForTest: () => set(createChartsDataState(null))
+  setLastProvider(providerId) {
+    set({ lastProviderId: providerId });
+  }
 }));
-
-function createChartsDataState(lastProviderId: RemoteProviderId | null) {
-  return {
-    chartsByProvider: {
-      qq: [],
-      netease: []
-    },
-    chartTracksById: {},
-    isLoadingByProvider: {
-      qq: false,
-      netease: false
-    },
-    errorMessageByProvider: {
-      qq: null,
-      netease: null
-    },
-    loadedByProvider: {
-      qq: false,
-      netease: false
-    },
-    isLoadingByChartId: {},
-    errorMessageByChartId: {},
-    loadedChartIds: {},
-    lastProviderId
-  };
-}
-
-function readStoredProviderId(): RemoteProviderId | null {
-  if (typeof localStorage === 'undefined') {
-    return null;
-  }
-
-  try {
-    const providerId = localStorage.getItem(CHARTS_PROVIDER_STORAGE_KEY);
-    return providerId === 'qq' || providerId === 'netease' ? providerId : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredProviderId(providerId: RemoteProviderId): void {
-  if (typeof localStorage === 'undefined') {
-    return;
-  }
-
-  try {
-    localStorage.setItem(CHARTS_PROVIDER_STORAGE_KEY, providerId);
-  } catch {
-    // The selected provider still updates when local storage is unavailable.
-  }
-}

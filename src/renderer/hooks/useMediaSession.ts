@@ -1,155 +1,77 @@
 import { useEffect } from 'react';
-import type { PlayableMedia } from '../../shared/musicTypes';
 import { usePlayerStore } from '../state/playerStore';
 
-const fallbackArtworkUrl = new URL('../../../assets/branding/obao-logo.png', import.meta.url).href;
-const mediaSessionActions: MediaSessionAction[] = [
-  'play',
-  'pause',
-  'previoustrack',
-  'nexttrack',
-  'seekto'
-];
-
 export function useMediaSession() {
-  const currentMedia = usePlayerStore((state) => state.currentMedia);
-  const currentSong = usePlayerStore((state) => state.currentSong);
-  const currentPlayableMedia = currentMedia ?? currentSong;
-  const isPlaying = usePlayerStore((state) => state.isPlaying);
-  const playbackPositionMs = usePlayerStore((state) => state.playbackPositionMs);
-  const playbackDurationMs = usePlayerStore((state) => state.playbackDurationMs);
-
   useEffect(() => {
-    const mediaSession = getMediaSession();
-    if (!mediaSession) {
-      return undefined;
-    }
+    if (!('mediaSession' in navigator)) return;
 
-    const handlers: Record<MediaSessionAction, MediaSessionActionHandler | null> = {
-      play: () => setPlaying(true),
-      pause: () => setPlaying(false),
+    const player = usePlayerStore.getState();
+
+    const handlers = {
+      play: () => usePlayerStore.getState().togglePlaying(),
+      pause: () => usePlayerStore.getState().togglePlaying(),
       previoustrack: () => usePlayerStore.getState().playPrevious(),
       nexttrack: () => usePlayerStore.getState().playNext(),
-      seekto: ({ seekTime }) => {
-        if (typeof seekTime !== 'number' || !Number.isFinite(seekTime)) {
-          return;
+      seekto: (details: MediaSessionActionDetails) => {
+        if (details.seekTime != null) {
+          usePlayerStore.getState().seekPlayback(details.seekTime * 1000);
         }
-
-        const player = usePlayerStore.getState();
-        player.seekPlayback(seekTime * 1000, player.playbackDurationMs);
-      },
-      seekbackward: null,
-      seekforward: null,
-      skipad: null,
-      stop: null
+      }
     };
-    const registeredActions = mediaSessionActions.filter((action) => (
-      setActionHandler(mediaSession, action, handlers[action])
-    ));
+
+    const register = () => {
+      try {
+        navigator.mediaSession.setActionHandler('play', handlers.play);
+        navigator.mediaSession.setActionHandler('pause', handlers.pause);
+        navigator.mediaSession.setActionHandler('previoustrack', handlers.previoustrack);
+        navigator.mediaSession.setActionHandler('nexttrack', handlers.nexttrack);
+        navigator.mediaSession.setActionHandler('seekto', handlers.seekto);
+      } catch {
+        // MediaSession API 部分浏览器不支持 setPositionState
+      }
+    };
+
+    register();
+
+    const unsubscribe = usePlayerStore.subscribe((state, prev) => {
+      const song = state.currentSong;
+      const isPlaying = state.isPlaying;
+
+      if (song && (song.id !== prev.currentSong?.id || isPlaying !== prev.isPlaying)) {
+        try {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: song.title,
+            artist: song.artist,
+            album: song.album,
+            artwork: song.coverUrl ? [{ src: song.coverUrl, sizes: '512x512' }] : []
+          });
+          navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+          if (state.playbackDurationMs > 0) {
+            navigator.mediaSession.setPositionState?.({
+              duration: state.playbackDurationMs / 1000,
+              position: state.playbackPositionMs / 1000,
+              playbackRate: 1
+            });
+          }
+        } catch {
+          // ignore
+        }
+      } else if (isPlaying !== prev.isPlaying && song) {
+        try {
+          navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+        } catch {
+          // ignore
+        }
+      }
+    });
 
     return () => {
-      registeredActions.forEach((action) => setActionHandler(mediaSession, action, null));
-      mediaSession.metadata = null;
-      mediaSession.playbackState = 'none';
-      clearPositionState(mediaSession);
+      unsubscribe();
+      try {
+        navigator.mediaSession.metadata = null;
+      } catch {
+        // ignore
+      }
     };
   }, []);
-
-  useEffect(() => {
-    const mediaSession = getMediaSession();
-    if (!mediaSession) {
-      return;
-    }
-
-    mediaSession.metadata = currentPlayableMedia ? createMediaMetadata(currentPlayableMedia) : null;
-  }, [currentPlayableMedia]);
-
-  useEffect(() => {
-    const mediaSession = getMediaSession();
-    if (!mediaSession) {
-      return;
-    }
-
-    mediaSession.playbackState = currentPlayableMedia ? (isPlaying ? 'playing' : 'paused') : 'none';
-  }, [currentPlayableMedia, isPlaying]);
-
-  useEffect(() => {
-    const mediaSession = getMediaSession();
-    if (!mediaSession || !currentPlayableMedia) {
-      if (mediaSession) {
-        clearPositionState(mediaSession);
-      }
-      return;
-    }
-
-    const duration = playbackDurationMs / 1000;
-    if (!Number.isFinite(duration) || duration <= 0) {
-      clearPositionState(mediaSession);
-      return;
-    }
-
-    const position = Math.min(Math.max(playbackPositionMs / 1000, 0), duration);
-    setPositionState(mediaSession, {
-      duration,
-      playbackRate: 1,
-      position
-    });
-  }, [currentPlayableMedia, playbackDurationMs, playbackPositionMs]);
-}
-
-function getMediaSession(): MediaSession | null {
-  if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) {
-    return null;
-  }
-
-  return navigator.mediaSession;
-}
-
-function createMediaMetadata(media: PlayableMedia): MediaMetadata {
-  const artworkUrl = media.coverUrl?.trim() || fallbackArtworkUrl;
-  const artist = media.mediaType === 'program' ? media.podcast.author : media.artist;
-  const album = media.mediaType === 'program' ? media.podcast.title : media.album;
-
-  return new MediaMetadata({
-    title: media.title,
-    artist,
-    album,
-    artwork: [{ src: artworkUrl }]
-  });
-}
-
-function setPlaying(playing: boolean) {
-  const player = usePlayerStore.getState();
-  if (player.isPlaying !== playing) {
-    player.togglePlaying();
-  }
-}
-
-function setActionHandler(
-  mediaSession: MediaSession,
-  action: MediaSessionAction,
-  handler: MediaSessionActionHandler | null
-): boolean {
-  try {
-    mediaSession.setActionHandler(action, handler);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function setPositionState(mediaSession: MediaSession, state: MediaPositionState) {
-  try {
-    mediaSession.setPositionState(state);
-  } catch {
-    // The platform may reject position updates before a media session becomes active.
-  }
-}
-
-function clearPositionState(mediaSession: MediaSession) {
-  try {
-    mediaSession.setPositionState();
-  } catch {
-    // Older platform implementations may not support clearing position state.
-  }
 }

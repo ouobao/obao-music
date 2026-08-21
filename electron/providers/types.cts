@@ -82,6 +82,13 @@ export interface ArtistDetail extends ArtistReference {
   albums: AlbumSummary[];
 }
 
+export interface ArtistSongsPage {
+  songs: Song[];
+  hasMore: boolean;
+  nextOffset: number;
+  total?: number;
+}
+
 export interface AlbumDetail extends AlbumSummary {
   description: string;
   artists: ArtistReference[];
@@ -178,6 +185,16 @@ export interface ChartSummary extends Playlist {
   updateLabel?: string;
 }
 
+export interface PlaylistDetail {
+  providerId: ProviderId;
+  playlist: Playlist;
+  tracks: Song[];
+  creatorName?: string;
+  playCount?: number;
+  trackCount?: number;
+  updateLabel?: string;
+}
+
 export interface PlaylistCategory {
   id: string;
   providerId: RemoteProviderId;
@@ -263,6 +280,22 @@ export interface LoginStatus {
   stale?: boolean;
   playbackReady?: boolean;
   message?: string;
+}
+
+export interface LoginQrSession {
+  providerId: ProviderId;
+  key: string;
+  qrImageDataUrl?: string;
+  qrText?: string;
+  expiresAtMs: number;
+}
+
+export type LoginQrPollState = 'waiting' | 'scanned' | 'expired' | 'success' | 'failed';
+
+export interface LoginQrPollResult {
+  state: LoginQrPollState;
+  message: string;
+  loginStatus?: LoginStatus;
 }
 
 export interface SearchOptions {
@@ -351,6 +384,7 @@ export interface SearchExperienceCapability {
 export interface ArtistCatalogCapability {
   getArtistDetail(artistId: string, options?: ProviderFetchOptions): Promise<ArtistDetail>;
   getAlbumDetail(albumId: string, options?: ProviderFetchOptions): Promise<AlbumDetail>;
+  getArtistSongsPage(artistId: string, offset: number, options?: ProviderFetchOptions): Promise<ArtistSongsPage>;
 }
 
 export interface RecommendationCapability {
@@ -462,9 +496,13 @@ export interface MusicProvider {
   getLoginStatus(): Promise<LoginStatus>;
   login(): Promise<LoginStatus>;
   logout(): Promise<void>;
+  createLoginQr?(): Promise<LoginQrSession>;
+  pollLoginQr?(key: string): Promise<LoginQrPollResult>;
+  cancelLoginQr?(key: string): Promise<void>;
   search(keyword: string, options?: SearchOptions): Promise<Song[]>;
   getUserPlaylists(options?: ProviderFetchOptions): Promise<Playlist[]>;
   getPlaylistTracks(playlistId: string, options?: ProviderFetchOptions): Promise<Song[]>;
+  getPlaylistDetail?(playlistId: string, options?: ProviderFetchOptions): Promise<PlaylistDetail>;
   getSongUrl(song: Song, quality: Quality): Promise<SongUrlResult>;
   getLyrics(song: Song): Promise<LyricsResult>;
   setSongLiked(song: Song, liked: boolean): Promise<SongMutationResult>;
@@ -555,6 +593,7 @@ export function createProviderNotReady(providerId: ProviderId): MusicProvider {
     search: reject,
     getUserPlaylists: reject,
     getPlaylistTracks: reject,
+    getPlaylistDetail: reject,
     getSongUrl: reject,
     getLyrics: reject,
     setSongLiked: reject,

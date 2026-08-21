@@ -47,7 +47,7 @@ export function getLyricsTransitionDuration(
     return reducedMotionDurationMs;
   }
 
-  return direction === 'enter' ? 2600 : 1200;
+  return direction === 'enter' ? 620 : 460;
 }
 
 export function createFallbackLyricsTransitionOrigin(): LyricsTransitionOrigin {

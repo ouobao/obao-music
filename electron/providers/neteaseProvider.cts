@@ -8,16 +8,20 @@ import type {
   AlbumSummary,
   ArtistDetail,
   ArtistReference,
+  ArtistSongsPage,
   ArtistSummary,
   ChartSummary,
   DiscoveredPlaylist,
   HomepageBlockFeed,
+  LoginQrPollResult,
+  LoginQrSession,
   LoginStatus,
   LyricsResult,
   MusicProvider,
   PlaybackRestriction,
   Playlist,
   PlaylistCategory,
+  PlaylistDetail,
   PlaylistDiscoveryPage,
   PlaylistDiscoveryQuery,
   PlaylistOwnership,
@@ -44,6 +48,9 @@ import { interleaveSearchSuggestionGroups } from './searchSuggestionUtils.cjs';
 export const NETEASE_LOGIN_PARTITION = 'persist:musicplayer-netease-login';
 export const NETEASE_LOGIN_URL = 'https://music.163.com/';
 export const NETEASE_ACCOUNT_URL = 'https://music.163.com/api/nuser/account/get';
+export const NETEASE_QR_UNIKEY_URL = 'https://music.163.com/api/login/qrcode/unikey';
+export const NETEASE_QR_POLL_URL = 'https://music.163.com/api/login/qrcode/client/login';
+export const NETEASE_QR_SCAN_URL_PREFIX = 'https://music.163.com/login?codekey=';
 export const NETEASE_SEARCH_URL = 'https://music.163.com/api/search/get/web';
 export const NETEASE_SEARCH_SUGGEST_URL = 'https://music.163.com/api/search/suggest/web';
 export const NETEASE_HOT_SEARCH_URL = 'https://music.163.com/api/search/hot/detail';
@@ -54,6 +61,7 @@ export const NETEASE_PLAYLIST_CATEGORIES_URL = 'https://music.163.com/api/playli
 export const NETEASE_PLAYLIST_DISCOVERY_URL = 'https://music.163.com/api/playlist/list';
 export const NETEASE_ARTIST_DETAIL_URL = 'https://music.163.com/api/v1/artist';
 export const NETEASE_ARTIST_ALBUMS_URL = 'https://music.163.com/api/artist/albums';
+export const NETEASE_ARTIST_SONGS_URL = 'https://music.163.com/api/v1/artist/songs';
 export const NETEASE_ALBUM_DETAIL_URL = 'https://music.163.com/api/v1/album';
 export const NETEASE_PERSONALIZED_NEW_SONGS_URL = 'https://music.163.com/api/personalized/newsong';
 export const NETEASE_DAILY_RECOMMENDED_SONGS_URL = 'https://music.163.com/api/v3/discovery/recommend/songs';
@@ -72,6 +80,8 @@ const NETEASE_SONG_URL_BASE_URL = 'https://music.163.com/api/song/enhance/player
 const NETEASE_IMAGE_ENCRYPTION_KEY = '3go8&$8*3*3h0k(2)2';
 const NETEASE_WEAPI_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0';
 const PROVIDER_REQUEST_TIMEOUT_MS = 12_000;
+const NETEASE_QR_EXPIRES_IN_MS = 10 * 60_000;
+const NETEASE_QR_COOKIE_MAX_AGE_SECONDS = 15 * 24 * 60 * 60;
 
 export interface NeteaseCookie {
   name: string;
@@ -81,6 +91,7 @@ export interface NeteaseCookie {
 export interface NeteaseRuntime {
   openLoginWindow(options: { partition: string; url: string }): Promise<void>;
   getCookies(partition: string): Promise<NeteaseCookie[]>;
+  setCookie(partition: string, cookie: NeteaseCookie): Promise<void>;
   requestJson<T>(request: {
     partition: string;
     url: string;
@@ -121,6 +132,9 @@ export function createNeteaseProvider(
         },
         getAlbumDetail(albumId, options = {}) {
           return getAlbumDetail(runtime, cache, albumId, options);
+        },
+        getArtistSongsPage(artistId, offset, options = {}) {
+          return getArtistSongsPage(runtime, artistId, offset, options);
         }
       },
       recommendations: {
@@ -178,6 +192,18 @@ export function createNeteaseProvider(
       return getLoginStatus(runtime, cache);
     },
 
+    async createLoginQr() {
+      return createLoginQr(runtime);
+    },
+
+    async pollLoginQr(key) {
+      return pollLoginQr(runtime, cache, key);
+    },
+
+    async cancelLoginQr() {
+      return Promise.resolve();
+    },
+
     async logout() {
       await runtime.clearSession(NETEASE_LOGIN_PARTITION);
       cache.deleteByPrefix(CACHE_KEYS.providerPrefix('netease'));
@@ -226,31 +252,12 @@ export function createNeteaseProvider(
     },
 
     async getPlaylistTracks(playlistId, options = {}) {
-      const platformPlaylistId = parseProviderScopedId(playlistId);
-      const providerScopedPlaylistId = createProviderScopedId(platformPlaylistId);
-      const cacheKey = CACHE_KEYS.playlistTracks('netease', providerScopedPlaylistId);
-      if (options.forceRefresh) {
-        cache.delete(cacheKey);
-      }
+      const detail = await loadNeteasePlaylistDetail(runtime, cache, playlistId, options);
+      return detail.tracks;
+    },
 
-      return cache.getOrSet(cacheKey, CACHE_TTL_MS.playlistTracks, async () => {
-        const response = await runtime.requestJson<NeteasePlaylistDetailResponse>({
-          partition: NETEASE_LOGIN_PARTITION,
-          url: createPlaylistDetailUrl(platformPlaylistId)
-        });
-        const playlist = response.playlist;
-        if (response.code !== 200) {
-          throw new Error('网易云歌单详情请求失败');
-        }
-        if (!playlist) {
-          throw new Error('网易云歌单详情数据无效');
-        }
-
-        const playlistTitle = playlist.name ?? '网易云歌单';
-        const tracks = await completeNeteasePlaylistTracks(runtime, playlist);
-
-        return tracks.map((track) => mapTrack(track, providerScopedPlaylistId, playlistTitle));
-      });
+    async getPlaylistDetail(playlistId, options = {}) {
+      return loadNeteasePlaylistDetail(runtime, cache, playlistId, options);
     },
 
     async getSongUrl(song, quality) {
@@ -749,38 +756,46 @@ async function getRecommendationHome(
 
   const loggedIn = (await getLoginStatus(runtime, cache)).loggedIn;
   const cacheKey = CACHE_KEYS.recommendationHome('netease', loggedIn);
+  // 先读走上一次成功写入的首页数据：实时刷新失败时回退到旧数据，
+  // 避免 forceRefresh 删掉良好缓存后本次请求失败导致“发现音乐整页空白”
+  const staleFeed = options.forceRefresh ? cache.peek<RecommendationHomeFeed>(cacheKey) : null;
   if (options.forceRefresh) {
     cache.delete(cacheKey);
   }
 
-  return cache.getOrSet(cacheKey, CACHE_TTL_MS.recommendationHome, async () => {
-    const moduleRequests = [getPersonalizedNewSongs(runtime)];
-    if (loggedIn) {
-      moduleRequests.push(getDailyRecommendedSongs(runtime));
-    }
-
-    const [newSongsResult, dailySongsResult] = await Promise.allSettled(moduleRequests);
-    if (newSongsResult.status === 'rejected' && (!dailySongsResult || dailySongsResult.status === 'rejected')) {
-      throw new Error('网易云推荐歌曲请求全部失败');
-    }
-
-    return {
-      providerId: 'netease',
-      loggedIn,
-      dailySongs: dailySongsResult?.status === 'fulfilled' ? dailySongsResult.value : [],
-      newSongs: newSongsResult.status === 'fulfilled' ? newSongsResult.value : [],
-      moduleResults: {
-        daily: !dailySongsResult
-          ? { status: 'skipped', errorMessage: null }
-          : dailySongsResult.status === 'fulfilled'
-            ? { status: 'fulfilled', errorMessage: null }
-            : { status: 'rejected', errorMessage: '网易云每日推荐加载失败' },
-        new: newSongsResult.status === 'fulfilled'
-          ? { status: 'fulfilled', errorMessage: null }
-          : { status: 'rejected', errorMessage: '网易云最新音乐加载失败' }
+  try {
+    return await cache.getOrSet(cacheKey, CACHE_TTL_MS.recommendationHome, async () => {
+      const moduleRequests = [getPersonalizedNewSongs(runtime)];
+      if (loggedIn) {
+        moduleRequests.push(getDailyRecommendedSongs(runtime));
       }
-    };
-  });
+
+      const [newSongsResult, dailySongsResult] = await Promise.allSettled(moduleRequests);
+      if (newSongsResult.status === 'rejected' && (!dailySongsResult || dailySongsResult.status === 'rejected')) {
+        throw new Error('网易云推荐歌曲请求全部失败');
+      }
+
+      return {
+        providerId: 'netease',
+        loggedIn,
+        dailySongs: dailySongsResult?.status === 'fulfilled' ? dailySongsResult.value : [],
+        newSongs: newSongsResult.status === 'fulfilled' ? newSongsResult.value : [],
+        moduleResults: {
+          daily: !dailySongsResult
+            ? { status: 'skipped', errorMessage: null }
+            : dailySongsResult.status === 'fulfilled'
+              ? { status: 'fulfilled', errorMessage: null }
+              : { status: 'rejected', errorMessage: '网易云每日推荐加载失败' },
+          new: newSongsResult.status === 'fulfilled'
+            ? { status: 'fulfilled', errorMessage: null }
+            : { status: 'rejected', errorMessage: '网易云最新音乐加载失败' }
+        }
+      };
+    });
+  } catch (error) {
+    if (staleFeed) return staleFeed;
+    throw error;
+  }
 }
 
 async function getPersonalizedNewSongs(runtime: NeteaseRuntime): Promise<Song[]> {
@@ -803,31 +818,37 @@ async function getNewAlbums(
   options: ProviderFetchOptions
 ): Promise<AlbumSummary[]> {
   const cacheKey = CACHE_KEYS.releaseCatalog('netease');
+  const staleAlbums = options.forceRefresh ? cache.peek<AlbumSummary[]>(cacheKey) : null;
   if (options.forceRefresh) {
     cache.delete(cacheKey);
   }
 
-  return cache.getOrSet(cacheKey, CACHE_TTL_MS.releaseCatalog, async () => {
-    const response = await runtime.requestJson<NeteaseNewAlbumsResponse>({
-      partition: NETEASE_LOGIN_PARTITION,
-      url: NETEASE_NEW_ALBUMS_URL,
-      method: 'POST',
-      form: { area: 'ALL', offset: '0', limit: '12', total: 'true' },
-      crypto: 'weapi',
-      credentials: 'omit'
-    });
-    if (response.code !== 200 || !Array.isArray(response.albums)) {
-      throw new Error('网易云新碟速递请求失败');
-    }
+  try {
+    return await cache.getOrSet(cacheKey, CACHE_TTL_MS.releaseCatalog, async () => {
+      const response = await runtime.requestJson<NeteaseNewAlbumsResponse>({
+        partition: NETEASE_LOGIN_PARTITION,
+        url: NETEASE_NEW_ALBUMS_URL,
+        method: 'POST',
+        form: { area: 'ALL', offset: '0', limit: '12', total: 'true' },
+        crypto: 'weapi',
+        credentials: 'omit'
+      });
+      if (response.code !== 200 || !Array.isArray(response.albums)) {
+        throw new Error('网易云新碟速递请求失败');
+      }
 
-    const albums = uniqueNeteaseAlbums(response.albums
-      .map(mapNeteaseAlbumSummary)
-      .filter((album): album is AlbumSummary => Boolean(album)));
-    if (response.albums.length > 0 && albums.length === 0) {
-      throw new Error('网易云新碟速递数据无效');
-    }
-    return albums.slice(0, 12);
-  });
+      const albums = uniqueNeteaseAlbums(response.albums
+        .map(mapNeteaseAlbumSummary)
+        .filter((album): album is AlbumSummary => Boolean(album)));
+      if (response.albums.length > 0 && albums.length === 0) {
+        throw new Error('网易云新碟速递数据无效');
+      }
+      return albums.slice(0, 12);
+    });
+  } catch (error) {
+    if (staleAlbums) return staleAlbums;
+    throw error;
+  }
 }
 
 function uniqueNeteaseAlbums(albums: readonly AlbumSummary[]): AlbumSummary[] {
@@ -866,29 +887,35 @@ async function getRecommendationHistoryDates(
   options: ProviderFetchOptions
 ): Promise<string[]> {
   const cacheKey = CACHE_KEYS.recommendationHistoryDates('netease');
+  const staleDates = options.forceRefresh ? cache.peek<string[]>(cacheKey) : null;
   if (options.forceRefresh) {
     cache.delete(cacheKey);
   }
 
-  return cache.getOrSet(cacheKey, CACHE_TTL_MS.recommendationHistory, async () => {
-    const response = await runtime.requestJson<NeteaseRecommendationHistoryResponse>({
-      partition: NETEASE_LOGIN_PARTITION,
-      url: NETEASE_RECOMMENDATION_HISTORY_DATES_URL,
-      method: 'POST',
-      form: {},
-      crypto: 'weapi'
-    });
-    if (response.code !== 200 || !Array.isArray(response.data?.dates)) {
-      throw new Error('网易云历史日推日期请求失败');
-    }
+  try {
+    return await cache.getOrSet(cacheKey, CACHE_TTL_MS.recommendationHistory, async () => {
+      const response = await runtime.requestJson<NeteaseRecommendationHistoryResponse>({
+        partition: NETEASE_LOGIN_PARTITION,
+        url: NETEASE_RECOMMENDATION_HISTORY_DATES_URL,
+        method: 'POST',
+        form: {},
+        crypto: 'weapi'
+      });
+      if (response.code !== 200 || !Array.isArray(response.data?.dates)) {
+        throw new Error('网易云历史日推日期请求失败');
+      }
 
-    const dates = [...new Set(response.data.dates.filter(isRecommendationHistoryDate))]
-      .sort((left, right) => right.localeCompare(left));
-    if (response.data.dates.length > 0 && dates.length === 0) {
-      throw new Error('网易云历史日推日期数据无效');
-    }
-    return dates;
-  });
+      const dates = [...new Set(response.data.dates.filter(isRecommendationHistoryDate))]
+        .sort((left, right) => right.localeCompare(left));
+      if (response.data.dates.length > 0 && dates.length === 0) {
+        throw new Error('网易云历史日推日期数据无效');
+      }
+      return dates;
+    });
+  } catch (error) {
+    if (staleDates) return staleDates;
+    throw error;
+  }
 }
 
 async function getRecommendationHistory(
@@ -994,36 +1021,42 @@ async function getHomepageBlocks(
   options: ProviderFetchOptions
 ): Promise<HomepageBlockFeed> {
   const cacheKey = CACHE_KEYS.homepageBlocks('netease');
+  const staleBlocks = options.forceRefresh ? cache.peek<HomepageBlockFeed>(cacheKey) : null;
   if (options.forceRefresh) {
     cache.delete(cacheKey);
   }
 
-  return cache.getOrSet(cacheKey, CACHE_TTL_MS.homepageBlocks, async () => {
-    const response = await runtime.requestJson<NeteaseHomepageBlocksResponse>({
-      partition: NETEASE_LOGIN_PARTITION,
-      url: NETEASE_HOMEPAGE_BLOCKS_URL,
-      method: 'POST',
-      form: { refresh: 'false' },
-      crypto: 'weapi',
-      credentials: 'omit'
-    });
-    if (response.code !== 200 || !Array.isArray(response.data?.blocks)) {
-      throw new Error('网易云首页 block 响应结构异常');
-    }
+  try {
+    return await cache.getOrSet(cacheKey, CACHE_TTL_MS.homepageBlocks, async () => {
+      const response = await runtime.requestJson<NeteaseHomepageBlocksResponse>({
+        partition: NETEASE_LOGIN_PARTITION,
+        url: NETEASE_HOMEPAGE_BLOCKS_URL,
+        method: 'POST',
+        form: { refresh: 'false' },
+        crypto: 'weapi',
+        credentials: 'omit'
+      });
+      if (response.code !== 200 || !Array.isArray(response.data?.blocks)) {
+        throw new Error('网易云首页 block 响应结构异常');
+      }
 
-    const songs = mapHomepageBlockSongs(response.data.blocks);
-    return {
-      providerId: 'netease',
-      blocks: songs.length > 0
-        ? [{
-            kind: 'song',
-            id: 'netease:homepage-block:songs',
-            title: '多元旋律之旅',
-            songs
-          }]
-        : []
-    };
-  });
+      const songs = mapHomepageBlockSongs(response.data.blocks);
+      return {
+        providerId: 'netease',
+        blocks: songs.length > 0
+          ? [{
+              kind: 'song',
+              id: 'netease:homepage-block:songs',
+              title: '多元旋律之旅',
+              songs
+            }]
+          : []
+      };
+    });
+  } catch (error) {
+    if (staleBlocks) return staleBlocks;
+    throw error;
+  }
 }
 
 function mapHomepageBlockSongs(blocks: readonly unknown[]): Song[] {
@@ -1105,7 +1138,10 @@ async function getSimilarSongs(
       throw new Error('网易云相似歌曲响应结构异常');
     }
 
-    return response.songs.map((track) => mapTrack(track, '', '', NETEASE_RECOMMENDATION_CONTEXT));
+    let songs = response.songs.map((track) => mapTrack(track, '', '', NETEASE_RECOMMENDATION_CONTEXT));
+    // 部分相似歌曲接口不返回封面/歌手图：通过歌曲详情接口批量补齐封面，避免推荐列表无封面
+    songs = await hydrateNeteaseSearchArtwork(runtime, song.title, songs);
+    return songs;
   });
 }
 
@@ -1229,6 +1265,39 @@ async function getArtistDetail(
         .filter((album): album is AlbumSummary => Boolean(album))
     };
   });
+}
+
+async function getArtistSongsPage(
+  runtime: NeteaseRuntime,
+  artistId: string,
+  offset: number,
+  options: ProviderFetchOptions
+): Promise<ArtistSongsPage> {
+  const platformArtistId = parseNeteaseEntityId(artistId, 'artist', '网易云歌手 ID 无效');
+  const providerScopedArtistId = `netease:artist:${platformArtistId}`;
+  const limit = 50;
+  const response = await runtime.requestJson<NeteaseArtistSongsResponse>({
+    partition: NETEASE_LOGIN_PARTITION,
+    url: `${NETEASE_ARTIST_SONGS_URL}?id=${platformArtistId}&offset=${offset}&limit=${limit}`
+  });
+  if (response.code !== 200) {
+    throw new Error('网易云歌手歌曲列表请求失败');
+  }
+
+  const sourceContext: SourceContext = {
+    type: 'artist',
+    providerId: 'netease',
+    artistId: providerScopedArtistId,
+    artistName: firstText(response.artist?.name) || ''
+  };
+  return {
+    songs: (response.songs ?? []).map((song) => mapTrack(song, '', '', sourceContext)),
+    hasMore: Boolean(response.more),
+    nextOffset: offset + (response.songs ?? []).length,
+    ...(normalizeNonNegativeNumber(response.artist?.musicSize) !== undefined
+      ? { total: normalizeNonNegativeNumber(response.artist?.musicSize) }
+      : {})
+  };
 }
 
 async function getAlbumDetail(
@@ -1531,6 +1600,99 @@ function parseChartId(chartId: string, providerId: 'netease'): string {
   }
 
   return platformChartId;
+}
+
+interface NeteaseQrKeyResponse {
+  code: number;
+  unikey?: string;
+  message?: string;
+}
+
+interface NeteaseQrPollResponse {
+  code: number;
+  message?: string;
+  cookie?: string;
+}
+
+async function createLoginQr(runtime: NeteaseRuntime): Promise<LoginQrSession> {
+  const response = await runtime.requestJson<NeteaseQrKeyResponse>({
+    partition: NETEASE_LOGIN_PARTITION,
+    url: NETEASE_QR_UNIKEY_URL,
+    method: 'POST',
+    form: { type: '1' },
+    crypto: 'weapi'
+  });
+
+  if (response.code !== 200 || !response.unikey) {
+    throw new Error(`网易云音乐二维码创建失败（${response.message || response.code || '未知错误'}）`);
+  }
+
+  return {
+    providerId: 'netease',
+    key: response.unikey,
+    qrText: `${NETEASE_QR_SCAN_URL_PREFIX}${response.unikey}`,
+    expiresAtMs: Date.now() + NETEASE_QR_EXPIRES_IN_MS
+  };
+}
+
+async function pollLoginQr(runtime: NeteaseRuntime, cache: CacheStore, key: string): Promise<LoginQrPollResult> {
+  const response = await runtime.requestJson<NeteaseQrPollResponse>({
+    partition: NETEASE_LOGIN_PARTITION,
+    url: NETEASE_QR_POLL_URL,
+    method: 'POST',
+    form: { key, type: '1' },
+    crypto: 'weapi'
+  });
+
+  switch (response.code) {
+    case 801:
+      return { state: 'waiting', message: '等待扫码' };
+    case 802:
+      return { state: 'scanned', message: '已扫码，请在手机上确认登录' };
+    case 800:
+      return { state: 'expired', message: '二维码已过期，请刷新' };
+    case 803:
+      await storeQrCookies(runtime, response.cookie);
+      cache.deleteByPrefix(CACHE_KEYS.providerPrefix('netease'));
+      return {
+        state: 'success',
+        message: '登录成功',
+        loginStatus: await getLoginStatus(runtime, cache)
+      };
+    default:
+      return {
+        state: 'failed',
+        message: `扫码登录失败（${response.message || response.code || '未知错误'}）`
+      };
+  }
+}
+
+async function storeQrCookies(runtime: NeteaseRuntime, cookieHeader: string | undefined): Promise<void> {
+  const cookies = parseNeteaseQrCookieHeader(cookieHeader);
+  if (!cookies.some((cookie) => cookie.name === 'MUSIC_U' && cookie.value)) {
+    throw new Error('网易云音乐登录响应中缺少登录凭证');
+  }
+
+  await Promise.all(cookies.map((cookie) => runtime.setCookie(NETEASE_LOGIN_PARTITION, cookie)));
+}
+
+function parseNeteaseQrCookieHeader(cookieHeader: string | undefined): NeteaseCookie[] {
+  const knownCookieNames = new Set(['MUSIC_U', 'MUSIC_A', '__csrf', '__remember_me', 'NMTID']);
+  const cookies: NeteaseCookie[] = [];
+  for (const segment of (cookieHeader ?? '').split(';')) {
+    const separatorIndex = segment.indexOf('=');
+    if (separatorIndex <= 0) {
+      continue;
+    }
+
+    const name = segment.slice(0, separatorIndex).trim();
+    const value = segment.slice(separatorIndex + 1).trim();
+    if (knownCookieNames.has(name) && value) {
+      cookies.push({ name, value });
+    }
+  }
+
+  return cookies;
 }
 
 async function getLoginStatus(runtime: NeteaseRuntime, cache: CacheStore): Promise<LoginStatus> {
@@ -1859,6 +2021,18 @@ function createElectronNeteaseRuntime(): NeteaseRuntime {
       return loginSession.cookies.get({ url: NETEASE_LOGIN_URL });
     },
 
+    async setCookie(partition, cookie) {
+      const electron = require('electron') as typeof import('electron');
+      const loginSession = electron.session.fromPartition(partition);
+
+      await loginSession.cookies.set({
+        url: NETEASE_LOGIN_URL,
+        name: cookie.name,
+        value: cookie.value,
+        expirationDate: Math.floor(Date.now() / 1000) + NETEASE_QR_COOKIE_MAX_AGE_SECONDS
+      });
+    },
+
     async requestJson({ partition, url, method = 'GET', form, crypto, credentials = 'include' }) {
       const electron = require('electron') as typeof import('electron');
       const loginSession = electron.session.fromPartition(partition);
@@ -2088,6 +2262,66 @@ async function completeNeteasePlaylistTracks(
   });
   const unreferencedTracks = existingTracks.filter((track) => !orderedTrackIdSet.has(String(track.id)));
   return [...orderedTracks, ...unreferencedTracks];
+}
+
+function formatNeteaseUpdateLabel(updateTime: number): string {
+  const date = new Date(updateTime > 1e12 ? updateTime : updateTime * 1000);
+  if (Number.isNaN(date.getTime())) return '';
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${weekdays[date.getDay()]}`;
+}
+
+async function loadNeteasePlaylistDetail(
+  runtime: NeteaseRuntime,
+  cache: CacheStore,
+  playlistId: string,
+  options: ProviderFetchOptions
+): Promise<PlaylistDetail> {
+  const platformPlaylistId = parseProviderScopedId(playlistId);
+  const providerScopedPlaylistId = createProviderScopedId(platformPlaylistId);
+  const cacheKey = CACHE_KEYS.playlistDetail('netease', providerScopedPlaylistId);
+  if (options.forceRefresh) {
+    cache.delete(cacheKey);
+  }
+
+  return cache.getOrSet(cacheKey, CACHE_TTL_MS.playlistDetail, async () => {
+    const response = await runtime.requestJson<NeteasePlaylistDetailResponse>({
+      partition: NETEASE_LOGIN_PARTITION,
+      url: createPlaylistDetailUrl(platformPlaylistId)
+    });
+    const playlist = response.playlist;
+    if (response.code !== 200) {
+      throw new Error('网易云歌单详情请求失败');
+    }
+    if (!playlist) {
+      throw new Error('网易云歌单详情数据无效');
+    }
+
+    const playlistTitle = playlist.name ?? '网易云歌单';
+    const tracks = await completeNeteasePlaylistTracks(runtime, playlist);
+    const songs = tracks.map((track) => mapTrack(track, providerScopedPlaylistId, playlistTitle));
+
+    const detailPlaylist: Playlist = {
+      id: providerScopedPlaylistId,
+      providerId: 'netease',
+      title: playlistTitle,
+      description: playlist.description ?? '',
+      songIds: [],
+      coverTone: NETEASE_COVER_TONE,
+      ...(playlist.coverImgUrl ? { coverUrl: playlist.coverImgUrl } : {}),
+      sourceLabel: NETEASE_SOURCE_LABEL
+    };
+
+    return {
+      providerId: 'netease',
+      playlist: detailPlaylist,
+      tracks: songs,
+      ...(playlist.creator?.nickname ? { creatorName: playlist.creator.nickname } : {}),
+      ...(playlist.playCount != null ? { playCount: playlist.playCount } : {}),
+      ...(playlist.trackCount != null ? { trackCount: playlist.trackCount } : {}),
+      ...(playlist.updateTime ? { updateLabel: formatNeteaseUpdateLabel(playlist.updateTime) } : {})
+    };
+  });
 }
 
 function createSongUrlUrl(songId: string, quality: Quality): string {
@@ -2620,6 +2854,17 @@ interface NeteasePlaylistDetailResponse {
 interface NeteasePlaylistDetail {
   id: number;
   name?: string;
+  description?: string;
+  coverImgUrl?: string;
+  specialType?: number;
+  userId?: number;
+  creator?: {
+    userId?: number;
+    nickname?: string;
+  };
+  playCount?: number;
+  trackCount?: number;
+  updateTime?: number;
   tracks?: NeteaseTrack[];
   trackIds?: Array<{
     id?: string | number;
@@ -2756,6 +3001,13 @@ interface NeteaseArtistDetailResponse {
   code?: number;
   artist?: NeteaseArtist;
   hotSongs?: NeteaseTrack[];
+}
+
+interface NeteaseArtistSongsResponse {
+  code?: number;
+  artist?: NeteaseArtist;
+  songs?: NeteaseTrack[];
+  more?: boolean;
 }
 
 interface NeteaseArtistAlbumsResponse {

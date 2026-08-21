@@ -35,6 +35,7 @@ export function createProviderRegistry(providers: MusicProvider[]): ProviderRegi
         const data = await action(this.getProvider(providerId));
         return { ok: true, data };
       } catch (error) {
+        console.warn('[provider-registry] run failed', { providerId, error: error instanceof Error ? error.stack : String(error) });
         return {
           ok: false,
           error: toProviderIpcError(providerId, error)

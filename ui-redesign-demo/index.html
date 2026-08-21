@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>欧包音乐 - Electron 桌面极简流体 UI 原型</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="components.css">
+  <link rel="stylesheet" href="views.css">
+</head>
+<body>
+  <!-- GPU 加速柔和流体环境光晕 -->
+  <div class="ambient-glow">
+    <div class="ambient-blob ambient-blob-1"></div>
+    <div class="ambient-blob ambient-blob-2"></div>
+  </div>
+
+  <!-- 全局抽屉 Backdrop 遮罩 (点击空白关闭抽屉) -->
+  <div class="drawer-overlay" id="drawer-overlay"></div>
+
+  <!-- 全局原生右键上下文菜单 -->
+  <div class="context-menu" id="app-context-menu">
+    <div class="context-menu-item" id="ctx-play-now">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      <span>立即播放</span>
+    </div>
+    <div class="context-menu-item" id="ctx-add-queue">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <span>添加到队列</span>
+    </div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item" id="ctx-like">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+      <span>喜欢/取消喜欢</span>
+    </div>
+    <div class="context-menu-item" id="ctx-artist">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>查看歌手</span>
+    </div>
+  </div>
+
+  <!-- 整体主外壳 Grid 布局 -->
+  <div class="app-layout" id="app-layout">
+    
+    <!-- 1. 侧边栏 -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="brand-logo">
+          <div class="logo-badge" id="logo-badge-trigger" title="点击展开侧边栏">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><path d="M10 8l6 4-6 4V8z"/></svg>
+          </div>
+          <span class="sidebar-brand-text">欧包音乐</span>
+        </div>
+        <button class="sidebar-toggle-btn" id="sidebar-toggle-btn" title="折叠侧边栏">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
+        </button>
+      </div>
+
+      <div class="nav-group-title">发现音乐</div>
+      <nav class="nav-menu">
+        <a href="#" class="nav-item active" data-view="home" title="发现音乐">
+          <div class="nav-item-icon">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          </div>
+          <span class="nav-item-label">发现音乐</span>
+        </a>
+        <a href="#" class="nav-item" data-view="charts" title="排行榜">
+          <div class="nav-item-icon">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+          </div>
+          <span class="nav-item-label">排行榜</span>
+        </a>
+        <a href="#" class="nav-item" data-view="discovery" title="歌单广场">
+          <div class="nav-item-icon">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          </div>
+          <span class="nav-item-label">歌单广场</span>
+        </a>
+      </nav>
+
+      <div class="nav-group-title">我的音乐</div>
+      <nav class="nav-menu">
+        <a href="#" class="nav-item" data-view="history" title="最近播放">
+          <div class="nav-item-icon">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <span class="nav-item-label">最近播放</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-playlist-section">
+        <div class="nav-group-title" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>创建的歌单</span>
+          <button style="color: var(--text-tertiary);" title="新建歌单">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+        <div class="sidebar-playlist-list">
+          <div class="playlist-nav-item" onclick="app.navigateTo('detail', { type: 'playlist', id: 'my_1' })">
+            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            <span>我喜欢的音乐</span>
+          </div>
+          <div class="playlist-nav-item" onclick="app.navigateTo('detail', { type: 'playlist', id: 'my_2' })">
+            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            <span>夜间专注代码清单</span>
+          </div>
+          <div class="playlist-nav-item" onclick="app.navigateTo('detail', { type: 'playlist', id: 'my_3' })">
+            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+            <span>自驾旅行公路之声</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 2. 顶栏 (TopBar) -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="nav-history-controls">
+          <button class="history-btn" title="后退">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+          <button class="history-btn" title="前进">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+        </div>
+
+        <div class="search-capsule">
+          <div class="search-input-wrapper">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="topbar-search-input" placeholder="搜索歌曲、歌手、专辑..." />
+          </div>
+
+          <!-- 搜索下拉弹层 -->
+          <div class="search-dropdown" id="search-dropdown">
+            <div class="dropdown-section-title">热门搜索</div>
+            <div class="tag-cloud">
+              <span class="tag-item" onclick="app.navigateTo('search', { keyword: '周杰伦' })">周杰伦</span>
+              <span class="tag-item" onclick="app.navigateTo('search', { keyword: '陈奕迅' })">陈奕迅</span>
+              <span class="tag-item" onclick="app.navigateTo('search', { keyword: 'Taylor Swift' })">Taylor Swift</span>
+              <span class="tag-item" onclick="app.navigateTo('search', { keyword: '如愿' })">如愿</span>
+            </div>
+            <div class="dropdown-section-title">搜索历史</div>
+            <div class="tag-cloud">
+              <span class="tag-item" onclick="app.navigateTo('search', { keyword: '叶惠美' })">叶惠美</span>
+              <span class="tag-item" onclick="app.navigateTo('search', { keyword: '米津玄師' })">米津玄師</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <!-- 平台切换控件 -->
+        <div class="provider-toggle">
+          <button class="provider-btn active" data-provider="netease">网易云</button>
+          <button class="provider-btn" data-provider="qq">QQ 音乐</button>
+        </div>
+
+        <!-- 主题切换器 -->
+        <button class="topbar-action-btn" id="theme-toggle-btn" title="切换设计主题">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        </button>
+
+        <!-- 用户登录胶囊 -->
+        <div class="user-profile-badge" id="user-login-btn">
+          <img class="user-avatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&q=80" alt="Avatar" />
+          <span class="user-name">音乐探索者</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- 3. 主内容区域 -->
+    <main class="main-content" id="main-content-area"></main>
+
+    <!-- 4. 底部播放栏 (PlayerBar) -->
+    <footer class="playerbar">
+      <div class="playerbar-left">
+        <div class="song-cover-wrapper" id="player-cover-trigger" title="点击展开全屏歌词">
+          <img class="song-cover-img" id="current-cover" src="https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=400&q=80" alt="Cover" />
+          <div class="song-cover-overlay">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h6v6m0 0l-7 7m-5 5H3v-6m0 0l7-7"/></svg>
+          </div>
+        </div>
+        <div class="song-info-meta">
+          <span class="song-title" id="current-title">晴天</span>
+          <span class="song-artist-album" id="current-artist">周杰伦 · 叶惠美</span>
+        </div>
+      </div>
+
+      <div class="playerbar-center">
+        <div class="playback-controls">
+          <button class="control-btn" id="mode-toggle-btn" title="播放模式选择">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          </button>
+
+          <div class="popover-menu" id="playmode-popover">
+            <div class="popover-menu-item active" data-mode="list"><span>顺序播放</span></div>
+            <div class="popover-menu-item" data-mode="random"><span>随机播放</span></div>
+            <div class="popover-menu-item" data-mode="single"><span>单曲循环</span></div>
+          </div>
+
+          <button class="control-btn" title="上一首">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+          </button>
+          <button class="control-btn play-primary" id="main-play-btn" title="播放 / 暂停">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button class="control-btn" title="下一首">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </button>
+        </div>
+
+        <div class="progress-bar-container">
+          <span class="time-label" id="time-current">01:08</span>
+          <div class="slider-track">
+            <div class="slider-progress" id="audio-progress" style="width: 25%;"></div>
+          </div>
+          <span class="time-label">04:29</span>
+        </div>
+      </div>
+
+      <div class="playerbar-right">
+        <button class="quality-badge-btn" id="quality-toggle-btn" title="点击选择音质">Hi-Res</button>
+
+        <div class="popover-menu" id="quality-popover" style="right: 120px;">
+          <div class="popover-menu-item" data-quality="standard"><span>标准音质 (128Kbps)</span></div>
+          <div class="popover-menu-item" data-quality="hq"><span>极高音质 (320Kbps)</span></div>
+          <div class="popover-menu-item" data-quality="lossless"><span>SQ 无损 (FLAC)</span></div>
+          <div class="popover-menu-item active" data-quality="hires"><span>Hi-Res 空间音频</span></div>
+        </div>
+
+        <button class="control-btn" id="similar-toggle-btn" title="相似歌曲雷达">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"/></svg>
+        </button>
+        <button class="control-btn" id="queue-toggle-btn" title="播放队列">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        </button>
+        <div class="volume-control-wrapper" style="display: flex; align-items: center; gap: 8px; width: 100px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+          <div class="slider-track" style="height: 3px;">
+            <div class="slider-progress" style="width: 70%;"></div>
+          </div>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- 🎯 修正点5：重构播放队列抽屉 (支持精致封面、清晰分界) -->
+  <div class="drawer-panel" id="queue-drawer">
+    <div class="drawer-header">
+      <h3 class="drawer-title">播放队列 (8)</h3>
+      <button class="section-action-btn" style="padding: 3px 8px; font-size: 11px;">清空</button>
+    </div>
+    <div class="queue-song-list">
+      <div class="queue-song-item playing">
+        <img class="queue-song-cover" src="https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=200&q=80" />
+        <div class="queue-song-meta">
+          <div class="queue-song-title">晴天</div>
+          <div class="queue-song-artist">周杰伦</div>
+        </div>
+        <span class="queue-song-time">04:29</span>
+      </div>
+      <div class="queue-song-item">
+        <img class="queue-song-cover" src="https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=200&q=80" />
+        <div class="queue-song-meta">
+          <div class="queue-song-title">七里香</div>
+          <div class="queue-song-artist">周杰伦</div>
+        </div>
+        <span class="queue-song-time">04:59</span>
+      </div>
+      <div class="queue-song-item">
+        <img class="queue-song-cover" src="https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=200&q=80" />
+        <div class="queue-song-meta">
+          <div class="queue-song-title">红豆</div>
+          <div class="queue-song-artist">王菲</div>
+        </div>
+        <span class="queue-song-time">04:19</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 相似歌曲抽屉 -->
+  <div class="drawer-panel" id="similar-drawer">
+    <div class="drawer-header">
+      <h3 class="drawer-title">相似歌曲推荐</h3>
+      <button class="section-action-btn" style="padding: 3px 8px; font-size: 11px;">换一批</button>
+    </div>
+    <div style="font-size: 11.5px; color: var(--text-tertiary); margin-bottom: 10px;">基于当前收听《晴天》智能生成</div>
+    <div class="queue-song-list">
+      <div class="queue-song-item">
+        <img class="queue-song-cover" src="https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=200&q=80" />
+        <div class="queue-song-meta">
+          <div class="queue-song-title">枫</div>
+          <div class="queue-song-artist">周杰伦 · 98% 相似度</div>
+        </div>
+        <button style="color: var(--text-tertiary);">＋</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. 全屏沉浸歌词页 -->
+  <div class="lyrics-overlay" id="lyrics-overlay">
+    <div class="lyrics-dynamic-bg">
+      <div class="lyrics-glow-orb lyrics-glow-1"></div>
+      <div class="lyrics-glow-orb lyrics-glow-2"></div>
+    </div>
+
+    <header class="lyrics-header">
+      <button class="history-btn" id="close-lyrics-btn" title="收起歌词">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 9l-7 7-7-7"/></svg>
+      </button>
+      <div style="font-size: 13.5px; font-weight: 600; color: var(--lyrics-header-text);">全屏歌词体验</div>
+      <div style="display: flex; gap: 8px;">
+        <button class="section-action-btn" style="padding: 4px 12px; font-size: 12px;">译 / 词</button>
+      </div>
+    </header>
+
+    <div class="lyrics-main-body">
+      <div class="lyrics-artwork-container">
+        <img class="lyrics-big-cover" src="https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&q=80" alt="Lyrics Cover" />
+        <div style="text-align: center;">
+          <h2 style="font-size: 24px; font-weight: 700; margin-bottom: 4px; color: var(--lyrics-text-active);">晴天 (Sunny Day)</h2>
+          <p style="font-size: 14px; color: var(--lyrics-text-hover);">周杰伦 · 叶惠美</p>
+        </div>
+      </div>
+
+      <!-- Apple Music 梯度距离模糊歌词视效 -->
+      <div class="lyrics-scroll-container" id="lyrics-scroll-container">
+        <div class="lyric-line">故事的小黄花 从出生那年就飘着</div>
+        <div class="lyric-line near-1">童年的荡秋千 随记忆一直晃到现在</div>
+        <div class="lyric-line active">
+          Re So So Si Do Si La
+          <div class="lyric-translation">Re So So Si Do Si La</div>
+        </div>
+        <div class="lyric-line near-1">
+          刮风这天 我试过握着你手
+          <div class="lyric-translation">On this windy day, I tried holding your hand</div>
+        </div>
+        <div class="lyric-line">但偏偏 雨渐渐 大到我看你不见</div>
+        <div class="lyric-line">还要多久 我才能在你身边</div>
+        <div class="lyric-line">等到放晴的那天 也许我会比较好一点</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. 登录弹窗模态框 -->
+  <div class="modal-backdrop" id="login-modal">
+    <div class="modal-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 16px; font-weight: 700;">登录欧包音乐</h3>
+        <button id="close-login-btn" style="color: var(--text-tertiary);">✕</button>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 6px 0;">
+        <div style="width: 160px; height: 160px; background: #fff; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md);">
+          <svg width="120" height="120" viewBox="0 0 24 24" fill="#000"><path d="M3 3h7v7H3V3zm2 2v3h3V5H5zm8-2h7v7h-7V3zm2 2v3h3V5h-3zM3 13h7v7H3v-7zm2 2v3h3v-3H5zm13-2h3v3h-3v-3zm-5 0h2v2h-2v-2zm0 3h2v2h-2v-2zm3 2h3v3h-3v-3zm-3 2h2v2h-2v-2z"/></svg>
+        </div>
+        <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">
+          使用 网易云音乐 / QQ音乐 手机客户端扫码登录
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="mockData.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

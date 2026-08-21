@@ -12,6 +12,7 @@ export interface CacheStore {
   get<T>(key: string): T | null;
   set<T>(key: string, value: T, ttlMs: number): void;
   getOrSet<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T>;
+  peek<T>(key: string): T | null;
   delete(key: string): void;
   deleteByPrefix(prefix: string): void;
   clear(): void;
@@ -21,6 +22,7 @@ export const CACHE_TTL_MS = {
   loginStatus: 60_000,
   providerPlaylists: 5 * 60_000,
   playlistTracks: 5 * 60_000,
+  playlistDetail: 5 * 60_000,
   chartList: 10 * 60_000,
   chartTracks: 5 * 60_000,
   playlistCategories: 30 * 60_000,
@@ -56,6 +58,9 @@ export const CACHE_KEYS = {
   },
   playlistTracks(providerId: CacheProviderId, playlistId: string) {
     return `${providerId}:playlist-tracks:${playlistId}`;
+  },
+  playlistDetail(providerId: CacheProviderId, playlistId: string) {
+    return `${providerId}:playlist-detail:v1:${playlistId}`;
   },
   chartList(providerId: CacheProviderId) {
     return `${providerId}:charts:v1`;

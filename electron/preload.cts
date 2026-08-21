@@ -71,6 +71,9 @@ const api = {
   music: {
     getLoginStatus: (providerId: string) => ipcRenderer.invoke('music:get-login-status', providerId) as Promise<unknown>,
     login: (providerId: string) => ipcRenderer.invoke('music:login', providerId) as Promise<unknown>,
+    loginQrCreate: (providerId: string) => ipcRenderer.invoke('music:login-qr-create', providerId) as Promise<unknown>,
+    loginQrPoll: (providerId: string, key: string) => ipcRenderer.invoke('music:login-qr-poll', providerId, key) as Promise<unknown>,
+    loginQrCancel: (providerId: string, key: string) => ipcRenderer.invoke('music:login-qr-cancel', providerId, key) as Promise<unknown>,
     logout: (providerId: string) => ipcRenderer.invoke('music:logout', providerId) as Promise<unknown>,
     search: (providerId: string, keyword: string, options?: unknown) =>
       ipcRenderer.invoke('music:search', providerId, keyword, options) as Promise<unknown>,
@@ -84,6 +87,8 @@ const api = {
       ipcRenderer.invoke('music:get-user-playlists', providerId, options) as Promise<unknown>,
     getPlaylistTracks: (providerId: string, playlistId: string, options?: unknown) =>
       ipcRenderer.invoke('music:get-playlist-tracks', providerId, playlistId, options) as Promise<unknown>,
+    getPlaylistDetail: (providerId: string, playlistId: string, options?: unknown) =>
+      ipcRenderer.invoke('music:get-playlist-detail', providerId, playlistId, options) as Promise<unknown>,
     getCharts: (providerId: string, options?: unknown) =>
       ipcRenderer.invoke('music:get-charts', providerId, options) as Promise<unknown>,
     getChartTracks: (providerId: string, chartId: string, options?: unknown) =>
@@ -94,6 +99,8 @@ const api = {
       ipcRenderer.invoke('music:get-discovered-playlists', providerId, query, options) as Promise<unknown>,
     getArtistDetail: (providerId: string, artistId: string, options?: unknown) =>
       ipcRenderer.invoke('music:get-artist-detail', providerId, artistId, options) as Promise<unknown>,
+    getArtistSongsPage: (providerId: string, artistId: string, offset: number, options?: unknown) =>
+      ipcRenderer.invoke('music:get-artist-songs-page', providerId, artistId, offset, options) as Promise<unknown>,
     getAlbumDetail: (providerId: string, albumId: string, options?: unknown) =>
       ipcRenderer.invoke('music:get-album-detail', providerId, albumId, options) as Promise<unknown>,
     getRecommendationHome: (providerId: string, options?: unknown) =>

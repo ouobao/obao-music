@@ -65,10 +65,7 @@ export const useLyricsStore = create<LyricsState>((set, get) => {
     });
 
     const outcome = await getOrCreateLyricsRequest(songKey, song);
-    if (
-      latestLyricsRequestRevision !== requestRevision
-      || get().songKey !== songKey
-    ) {
+    if (latestLyricsRequestRevision !== requestRevision || get().songKey !== songKey) {
       return null;
     }
 
@@ -98,23 +95,15 @@ export const useLyricsStore = create<LyricsState>((set, get) => {
   const resetForTest: LyricsState['resetForTest'] = () => {
     latestLyricsRequestRevision = ++lyricsRequestRevision;
     pendingLyricsRequests.clear();
-    // Zustand merges partial updates; restore actions as well as data fields so
-    // tests that replace an action cannot leak it into the following case.
     set({ ...initialState, loadLyrics, resetForTest });
   };
 
-  return {
-    ...initialState,
-    loadLyrics,
-    resetForTest
-  };
+  return { ...initialState, loadLyrics, resetForTest };
 });
 
 function getOrCreateLyricsRequest(songKey: string, song: Song) {
   const pendingRequest = pendingLyricsRequests.get(songKey);
-  if (pendingRequest) {
-    return pendingRequest;
-  }
+  if (pendingRequest) return pendingRequest;
 
   const request = requestLyrics(song);
   pendingLyricsRequests.set(songKey, request);
@@ -144,9 +133,7 @@ async function requestLyrics(song: Song): Promise<LyricsRequestOutcome> {
 }
 
 function decodeLyricsResult(result: unknown, song: Song): LyricsRequestOutcome {
-  if (!isRecord(result)) {
-    return invalidLyricsResponse();
-  }
+  if (!isRecord(result)) return invalidLyricsResponse();
 
   if (result.ok === false) {
     return {
@@ -155,14 +142,10 @@ function decodeLyricsResult(result: unknown, song: Song): LyricsRequestOutcome {
     };
   }
 
-  if (result.ok !== true || !isRecord(result.data)) {
-    return invalidLyricsResponse();
-  }
+  if (result.ok !== true || !isRecord(result.data)) return invalidLyricsResponse();
 
   const data = result.data;
-  if (data.providerId !== song.providerId || typeof data.ok !== 'boolean') {
-    return invalidLyricsResponse();
-  }
+  if (data.providerId !== song.providerId || typeof data.ok !== 'boolean') return invalidLyricsResponse();
 
   if (!data.ok) {
     return {
@@ -172,26 +155,16 @@ function decodeLyricsResult(result: unknown, song: Song): LyricsRequestOutcome {
   }
 
   const lrc = readNonEmptyString(data.lrc);
-  if (!lrc) {
-    return invalidLyricsResponse();
-  }
+  if (!lrc) return invalidLyricsResponse();
 
   const lrcError = validateLyricsInput(lrc);
-  if (lrcError) {
-    return { ok: false, errorMessage: lrcError };
-  }
+  if (lrcError) return { ok: false, errorMessage: lrcError };
 
   const tlyric = readNonEmptyString(data.tlyric);
   const tlyricError = tlyric ? validateLyricsInput(tlyric) : null;
-  if (tlyricError) {
-    return { ok: false, errorMessage: tlyricError };
-  }
+  if (tlyricError) return { ok: false, errorMessage: tlyricError };
 
-  return {
-    ok: true,
-    lrc,
-    tlyric
-  };
+  return { ok: true, lrc, tlyric };
 }
 
 function invalidLyricsResponse(): LyricsRequestFailure {

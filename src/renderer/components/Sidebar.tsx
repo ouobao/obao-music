@@ -1,475 +1,180 @@
-import {
-  Bookmark,
-  ChevronDown,
-  Compass,
-  Heart,
-  LayoutGrid,
-  ListPlus,
-  PanelLeftClose,
-  PanelLeftOpen,
-  RefreshCw,
-  Trophy,
-  type LucideIcon
-} from 'lucide-react';
-import type { CSSProperties } from 'react';
-import { memo, useCallback, useMemo, useState } from 'react';
-import { MainContentTransition } from './MainContentTransition';
+import { useEffect, useState } from 'react';
+import { useUiStore } from '../state/uiStore';
 import { useLibraryStore } from '../state/libraryStore';
-import type { AppView, ContentTransitionStyle, NavigationDirection } from '../state/uiStore';
-import { formatSidebarLikedPlaylistDisplayTitle, isProviderLikedPlaylist } from '../utils/playlistDisplay';
-import { formatProviderSourceLabel } from '../utils/providerDisplay';
-import type { Playlist, PlaylistOwnership, ProviderId, RemoteProviderId } from '../../shared/musicTypes';
-import obaoLogoUrl from '../../../assets/branding/obao-logo.svg';
+import { useProviderSessionStore } from '../state/providerSessionStore';
+import type { Playlist, ProviderId } from '../../shared/musicTypes';
+import { formatPlaylistTitle } from '../utils/providerDisplay';
+import { onImageReveal, imageRevealRef } from '../utils/imageReveal';
+import { NavChartsIcon, NavDiscoverIcon, NavHistoryIcon, NavPlaylistIcon } from './icons';
+import { SkeletonBlock } from './Skeleton';
+import logoUrl from '../../../assets/branding/logo5.png';
 
-interface PrimaryNavItem {
-  label: string;
-  icon: LucideIcon;
-  action: PrimaryNavView;
-}
-
-type PrimaryNavView = 'home' | 'charts' | 'playlistDiscovery';
-
-interface SidebarProps {
-  isCollapsed?: boolean;
-  currentView?: AppView;
-  canRefreshProviderLibrary?: boolean;
-  isProviderLibraryRefreshing?: boolean;
-  contentTransitionStyle?: ContentTransitionStyle;
-  navigationDirection?: NavigationDirection;
-  reduceEffects?: boolean;
-  onNavigateHome?: () => void;
-  onNavigateCharts?: () => void;
-  onNavigatePlaylistDiscovery?: () => void;
-  onRefreshProviderLibrary?: () => void;
-  onSelectProviderPlaylist?: (providerId: ProviderId, playlistId: string) => void;
-  onToggleSidebarCollapsed?: () => void;
-}
-
-type PlaylistCategoryId = PlaylistOwnership;
-
-interface LibraryPlaylistCategory {
-  id: PlaylistCategoryId;
-  title: string;
-  ariaLabel: string;
-  providers: Array<{
-    providerId: RemoteProviderId;
-    playlists: Playlist[];
-  }>;
-}
-
-const playlistCategoryMeta: Record<PlaylistCategoryId, { title: string; ariaLabel: string }> = {
-  liked: { title: '我喜欢', ariaLabel: 'liked playlists' },
-  created: { title: '创建的歌单', ariaLabel: 'created playlists' },
-  subscribed: { title: '收藏的歌单', ariaLabel: 'subscribed playlists' }
-};
-
-const primaryNav: PrimaryNavItem[] = [
-  { label: '发现音乐', icon: Compass, action: 'home' },
-  { label: '排行榜', icon: Trophy, action: 'charts' },
-  { label: '歌单广场', icon: LayoutGrid, action: 'playlistDiscovery' }
+const NAV_ITEMS: { view: 'home' | 'charts' | 'playlistDiscovery' | 'listeningHistory'; label: string; icon: React.ReactNode }[] = [
+  { view: 'home', label: '推荐', icon: <NavDiscoverIcon size={17} strokeWidth={1.8} /> },
+  { view: 'charts', label: '排行榜', icon: <NavChartsIcon size={17} strokeWidth={1.8} /> },
+  { view: 'playlistDiscovery', label: '歌单广场', icon: <NavPlaylistIcon size={17} strokeWidth={1.8} /> },
+  { view: 'listeningHistory', label: '最近播放', icon: <NavHistoryIcon size={17} strokeWidth={1.8} /> }
 ];
 
-const remoteProviderIds: RemoteProviderId[] = ['qq', 'netease'];
+export function Sidebar() {
+  const currentView = useUiStore((s) => s.currentView.name);
+  const navigateToView = useUiStore((s) => s.navigateToView);
+  const activeProviderId = useProviderSessionStore((s) => s.activeProviderId);
+  const providerPlaylists = useLibraryStore((s) => s.providerPlaylists);
+  const playlistsLoading = useLibraryStore((s) => s.playlistsLoading);
+  const loadProviderPlaylists = useLibraryStore((s) => s.loadProviderPlaylists);
+  const selectPlaylist = useLibraryStore((s) => s.selectPlaylist);
+  const selectedPlaylistId = useLibraryStore((s) => s.selectedPlaylistId);
 
-const libraryCategoryIcons: Record<PlaylistCategoryId, LucideIcon> = {
-  liked: Heart,
-  created: ListPlus,
-  subscribed: Bookmark
-};
+  useEffect(() => {
+    if (activeProviderId !== 'local') {
+      loadProviderPlaylists(activeProviderId);
+    }
+  }, [activeProviderId, loadProviderPlaylists]);
 
-const defaultView: AppView = { type: 'home' };
+  const playlists = providerPlaylists[activeProviderId] ?? [];
+  const likedPlaylists = playlists.filter((p) => p.ownership === 'liked' || p.isLiked);
+  const createdPlaylists = playlists.filter((p) => p.ownership === 'created' && !p.isLiked);
+  const subscribedPlaylists = playlists.filter((p) => p.ownership === 'subscribed');
 
-interface SidebarPlaylistItemProps {
-  extraClassName?: string;
-  isLiked: boolean;
-  isSelected: boolean;
-  onSelect: (providerId: ProviderId, playlistId: string) => void;
-  playlist: Playlist;
-}
-
-const SidebarPlaylistItem = memo(function SidebarPlaylistItem({
-  extraClassName = '',
-  isLiked,
-  isSelected,
-  onSelect,
-  playlist
-}: SidebarPlaylistItemProps) {
-  if (isLiked) {
-    const displayTitle = formatSidebarLikedPlaylistDisplayTitle(playlist);
-    const className = [
-      'nav-item',
-      'nav-library-playlist-item',
-      'nav-library-liked-playlist-item',
-      isSelected ? 'nav-playlist-item-active' : ''
-    ].filter(Boolean).join(' ');
-
-    return (
-      <button
-        className={className}
-        type="button"
-        aria-pressed={isSelected}
-        aria-label={displayTitle}
-        title={displayTitle}
-        onClick={() => onSelect(playlist.providerId, playlist.id)}
-      >
-        <span className="nav-liked-playlist-title">{displayTitle}</span>
-      </button>
-    );
-  }
-
-  const providerSourceLabel = formatProviderSourceLabel(playlist.providerId);
-  const className = [
-    'nav-item',
-    'nav-item-compact',
-    'nav-playlist-item',
-    extraClassName,
-    isSelected ? 'nav-playlist-item-active' : ''
-  ].filter(Boolean).join(' ');
+  const openPlaylist = (providerId: ProviderId, playlist: Playlist) => {
+    selectPlaylist(providerId, playlist.id);
+    navigateToView('playlist', { providerId, playlistId: playlist.id, title: playlist.title });
+  };
 
   return (
-    <button
-      className={className}
-      type="button"
-      aria-pressed={isSelected}
-      aria-label={`${playlist.title}，来源：${providerSourceLabel}`}
-      title={`${playlist.title} · ${providerSourceLabel}`}
-      onClick={() => onSelect(playlist.providerId, playlist.id)}
-    >
-      <span
-        className="nav-playlist-cover"
-        style={
-          {
-            '--cover-tone': playlist.coverTone,
-            '--playlist-cover-image': playlist.coverUrl ? `url("${playlist.coverUrl}")` : 'linear-gradient(135deg, rgb(255 255 255 / 18%), rgb(255 255 255 / 3%))'
-          } as CSSProperties
-        }
-        aria-hidden="true"
-      >
-        <span className={`nav-playlist-provider-badge nav-playlist-provider-badge-${playlist.providerId}`} />
-      </span>
-      <span className="nav-playlist-main">
-        <span className="nav-playlist-title">{playlist.title}</span>
-        <span className="nav-playlist-source">{providerSourceLabel}</span>
-      </span>
-    </button>
-  );
-});
+    <aside className="sidebar">
+      <div className="sidebar-header">
+        <div className="brand-logo" title="欧包音乐">
+          <img className="logo-badge" src={logoUrl} alt="欧包音乐" draggable={false} />
+          <span className="sidebar-brand-text">欧包音乐</span>
+        </div>
+      </div>
 
-export function Sidebar({
-  isCollapsed = false,
-  currentView = defaultView,
-  canRefreshProviderLibrary = false,
-  isProviderLibraryRefreshing = false,
-  contentTransitionStyle = 'soft',
-  navigationDirection = 'forward',
-  reduceEffects = false,
-  onNavigateHome,
-  onNavigateCharts,
-  onNavigatePlaylistDiscovery,
-  onRefreshProviderLibrary,
-  onSelectProviderPlaylist,
-  onToggleSidebarCollapsed
-}: SidebarProps) {
-  const providerPlaylistsByProvider = useLibraryStore((state) => state.providerPlaylists);
-  const selectProviderPlaylist = useLibraryStore((state) => state.selectProviderPlaylist);
-  const libraryIsLoading = useLibraryStore((state) => (
-    currentView.type === 'charts' || currentView.type === 'chart' || currentView.type === 'playlistDiscovery'
-      ? false
-      : state.isLoading
-  ));
-  const libraryCategories = useMemo(
-    () => groupProviderPlaylistsByCategory(providerPlaylistsByProvider),
-    [providerPlaylistsByProvider]
-  );
-  const [activeProviderByCategory, setActiveProviderByCategory] = useState<Partial<Record<PlaylistCategoryId, RemoteProviderId>>>({});
-  const [tabDirectionByCategory, setTabDirectionByCategory] = useState<Partial<Record<PlaylistCategoryId, NavigationDirection>>>({});
-  const [expandedCategories, setExpandedCategories] = useState<Partial<Record<PlaylistCategoryId, boolean>>>({});
-  const CollapseIcon = isCollapsed ? PanelLeftOpen : PanelLeftClose;
-  const sidebarClassName = isCollapsed ? 'sidebar sidebar-collapsed' : 'sidebar';
-  const navTopSectionClassName = libraryCategories.length > 0 ? 'nav-top-section nav-top-section-with-library' : 'nav-top-section';
-  const isRefreshPending = isProviderLibraryRefreshing || libraryIsLoading;
-  const refreshButtonClassName = isRefreshPending
-    ? 'sidebar-refresh-button sidebar-refresh-button-loading'
-    : 'sidebar-refresh-button';
-  const handleSelectPlaylist = useCallback((providerId: ProviderId, playlistId: string) => {
-    if (onSelectProviderPlaylist) {
-      onSelectProviderPlaylist(providerId, playlistId);
-      return;
-    }
-
-    void selectProviderPlaylist(providerId, playlistId);
-  }, [onSelectProviderPlaylist, selectProviderPlaylist]);
-  const renderRefreshButton = () => (
-    <button
-      className={refreshButtonClassName}
-      type="button"
-      aria-label="刷新当前内容"
-      disabled={!canRefreshProviderLibrary || isRefreshPending}
-      title="刷新当前内容"
-      onClick={onRefreshProviderLibrary}
-    >
-      <RefreshCw aria-hidden="true" size={20} />
-    </button>
-  );
-  const renderCollapseButton = () => (
-    <button
-      className="sidebar-collapse-toggle"
-      type="button"
-      aria-label={isCollapsed ? '展开菜单' : '收起菜单'}
-      aria-pressed={isCollapsed}
-      title={isCollapsed ? '展开菜单' : '收起菜单'}
-      onClick={onToggleSidebarCollapsed}
-    >
-      <CollapseIcon aria-hidden="true" size={20} />
-    </button>
-  );
-  const renderProviderPlaylistButton = (playlist: Playlist, extraClassName = '') => {
-    const isSelected = isPlaylistViewActive(currentView, playlist);
-    return (
-      <SidebarPlaylistItem
-        playlist={playlist}
-        extraClassName={extraClassName}
-        isLiked={false}
-        isSelected={isSelected}
-        onSelect={handleSelectPlaylist}
-        key={playlist.id}
-      />
-    );
-  };
-  const renderLikedPlaylistButton = (playlist: Playlist) => {
-    const isSelected = isPlaylistViewActive(currentView, playlist);
-    return (
-      <SidebarPlaylistItem
-        playlist={playlist}
-        isLiked
-        isSelected={isSelected}
-        onSelect={handleSelectPlaylist}
-        key={playlist.id}
-      />
-    );
-  };
-  const renderLibraryCategory = (category: LibraryPlaylistCategory) => {
-    const selectedProviderId = category.providers.some(
-      (provider) => provider.providerId === activeProviderByCategory[category.id]
-    )
-      ? activeProviderByCategory[category.id] as RemoteProviderId
-      : category.providers[0].providerId;
-    const selectedProvider = category.providers.find((provider) => provider.providerId === selectedProviderId)
-      ?? category.providers[0];
-    const panelId = `sidebar-library-${category.id}-${selectedProvider.providerId}`;
-    const drawerId = `sidebar-library-drawer-${category.id}`;
-    const CategoryIcon = libraryCategoryIcons[category.id];
-    const tabDirection = tabDirectionByCategory[category.id] ?? navigationDirection;
-    const isExpanded = expandedCategories[category.id] ?? true;
-
-    return (
-      <section
-        className="nav-library-category"
-        role="group"
-        aria-label={category.ariaLabel}
-        data-expanded={isExpanded}
-        key={category.id}
-      >
-        {!isCollapsed && (
-          <div className="nav-library-category-heading">
+      <div>
+        <div className="nav-group-title">发现音乐</div>
+        <nav className="nav-menu">
+          {NAV_ITEMS.map((item, index) => (
             <button
-              className="nav-library-category-trigger"
-              type="button"
-              aria-expanded={isExpanded}
-              aria-controls={drawerId}
-              onClick={() => {
-                setExpandedCategories((current) => ({
-                  ...current,
-                  [category.id]: !(current[category.id] ?? true)
-                }));
-              }}
+              key={item.view}
+              className={`nav-item ${currentView === item.view ? 'active' : ''}`}
+              onClick={() => navigateToView(item.view)}
+              title={item.label}
+              style={{ '--i': index } as React.CSSProperties}
             >
-              <CategoryIcon aria-hidden="true" size={20} />
-              <span>{category.title}</span>
-              <ChevronDown className="nav-library-category-chevron" aria-hidden="true" size={16} />
+              <span className="nav-item-icon">{item.icon}</span>
+              <span className="nav-item-label">{item.label}</span>
             </button>
-          </div>
-        )}
-        {!isCollapsed ? (
-          <div className="nav-library-category-drawer" id={drawerId} aria-hidden={!isExpanded}>
-            <div className="nav-library-category-drawer-content">
-              {category.providers.length > 1 ? (
-                <div className="nav-library-provider-tabs" role="tablist" aria-label={`${category.title} 来源`}>
-                  {category.providers.map((provider) => {
-                    const isActive = provider.providerId === selectedProvider.providerId;
-                    const providerLabel = formatProviderSourceLabel(provider.providerId);
-                    return (
-                      <button
-                        className={isActive ? 'nav-library-provider-tab nav-library-provider-tab-active' : 'nav-library-provider-tab'}
-                        type="button"
-                        role="tab"
-                        aria-selected={isActive}
-                        aria-controls={isActive ? panelId : undefined}
-                        key={provider.providerId}
-                        onClick={() => {
-                          if (isActive) {
-                            return;
-                          }
+          ))}
+        </nav>
+      </div>
 
-                          const currentIndex = category.providers.findIndex(
-                            (currentProvider) => currentProvider.providerId === selectedProvider.providerId
-                          );
-                          const nextIndex = category.providers.findIndex(
-                            (currentProvider) => currentProvider.providerId === provider.providerId
-                          );
-                          setTabDirectionByCategory((current) => ({
-                            ...current,
-                            [category.id]: nextIndex < currentIndex ? 'backward' : 'forward'
-                          }));
-                          setActiveProviderByCategory((current) => ({
-                            ...current,
-                            [category.id]: provider.providerId
-                          }));
-                        }}
-                      >
-                        {providerLabel}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-              <div className="nav-provider-category-list nav-library-category-list" id={panelId} role="tabpanel">
-                <MainContentTransition
-                  transitionKey={`${category.id}:${selectedProvider.providerId}`}
-                  motionKey={`${category.id}:${selectedProvider.providerId}`}
-                  scope="section"
-                  style={contentTransitionStyle}
-                  direction={tabDirection}
-                  reduceEffects={reduceEffects}
-                >
-                  <div className="nav-library-tab-content">
-                    {selectedProvider.playlists.length > 0
-                      ? selectedProvider.playlists.map((playlist) =>
-                        category.id === 'liked' ? renderLikedPlaylistButton(playlist) : renderProviderPlaylistButton(playlist)
-                      )
-                      : <p className="nav-library-empty">暂无歌单</p>}
-                  </div>
-                </MainContentTransition>
-              </div>
+      <div className="sidebar-playlist-section">
+        {likedPlaylists.length > 0 && (
+          <div className="sidebar-playlist-group">
+            <div className="nav-group-title">
+              <span>我喜欢</span>
+              <span className="nav-group-count">{likedPlaylists.length}</span>
+            </div>
+            <div className="sidebar-playlist-list">
+              {likedPlaylists.map((playlist, index) => (
+                <PlaylistNavItem
+                  key={playlist.id}
+                  playlist={playlist}
+                  selected={selectedPlaylistId === playlist.id}
+                  onOpen={() => openPlaylist(activeProviderId, playlist)}
+                  index={index}
+                />
+              ))}
             </div>
           </div>
-        ) : null}
-      </section>
-    );
-  };
+        )}
 
-  return (
-    <nav className={sidebarClassName} aria-label="主导航">
-      <div className="brand-block">
-        <span className="brand-mark" aria-hidden="true">
-          <img src={obaoLogoUrl} alt="" />
-        </span>
-        <span className="brand-name">欧包音乐</span>
-      </div>
-
-      <div className="sidebar-scroll-area">
-        <div className={navTopSectionClassName}>
-          <div className="nav-section">
-            {primaryNav.map((item) => {
-            const Icon = item.icon;
-            const isActive = isPrimaryNavViewActive(currentView, item.action);
-            return (
-              <button
-                className={isActive ? 'nav-item nav-primary-item nav-item-active' : 'nav-item nav-primary-item'}
-                type="button"
-                key={item.label}
-                aria-current={isActive ? 'page' : undefined}
-                aria-label={item.label}
-                title={item.label}
-                onClick={
-                  item.action === 'home'
-                    ? onNavigateHome
-                    : item.action === 'charts'
-                      ? onNavigateCharts
-                      : onNavigatePlaylistDiscovery
-                }
-              >
-                <span className="nav-item-icon" aria-hidden="true">
-                  <span className="nav-item-indicator" />
-                  <Icon size={20} />
-                </span>
-                <span className="nav-label">{item.label}</span>
-              </button>
-            );
-            })}
+        <div className="sidebar-playlist-group">
+          <div className="nav-group-title">
+            <span>我的歌单</span>
+            {createdPlaylists.length + subscribedPlaylists.length > 0 && (
+              <span className="nav-group-count">{createdPlaylists.length + subscribedPlaylists.length}</span>
+            )}
+          </div>
+          <div className="sidebar-playlist-list">
+            {playlistsLoading[activeProviderId] && playlists.length === 0 && (
+              <div className="sidebar-playlist-skeleton" aria-hidden="true">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div className="sidebar-playlist-skeleton-row" key={i}>
+                    <SkeletonBlock width={28} height={28} radius="var(--radius-sm)" />
+                    <SkeletonBlock height={12} width={`${50 + ((i * 13) % 40)}%`} radius="var(--radius-xs)" />
+                  </div>
+                ))}
+              </div>
+            )}
+            {!playlistsLoading[activeProviderId] && playlists.length === 0 && (
+              <div style={{ padding: '8px', fontSize: 11.5, color: 'var(--text-muted)' }}>
+                {activeProviderId === 'netease' || activeProviderId === 'qq' ? '登录后同步歌单' : '暂无歌单'}
+              </div>
+            )}
+            {createdPlaylists.length > 0 && subscribedPlaylists.length > 0 && (
+              <div className="sidebar-playlist-subtitle">我创建的</div>
+            )}
+            {createdPlaylists.map((playlist, index) => (
+              <PlaylistNavItem
+                key={playlist.id}
+                playlist={playlist}
+                selected={selectedPlaylistId === playlist.id}
+                onOpen={() => openPlaylist(activeProviderId, playlist)}
+                index={likedPlaylists.length + index}
+              />
+            ))}
+            {subscribedPlaylists.length > 0 && (
+              <div className="sidebar-playlist-subtitle">我收藏的</div>
+            )}
+            {subscribedPlaylists.map((playlist, index) => (
+              <PlaylistNavItem
+                key={playlist.id}
+                playlist={playlist}
+                selected={selectedPlaylistId === playlist.id}
+                onOpen={() => openPlaylist(activeProviderId, playlist)}
+                index={likedPlaylists.length + createdPlaylists.length + index}
+              />
+            ))}
           </div>
         </div>
-
-        <div className="nav-provider-library-section">
-          {libraryCategories.map((category) => renderLibraryCategory(category))}
-        </div>
       </div>
-
-      <div className="sidebar-bottom-controls">
-        {isCollapsed ? (
-          <>
-            {renderRefreshButton()}
-            {renderCollapseButton()}
-          </>
-        ) : (
-          <>
-            {renderCollapseButton()}
-            {renderRefreshButton()}
-          </>
-        )}
-      </div>
-    </nav>
+    </aside>
   );
 }
 
-function groupProviderPlaylistsByCategory(
-  providerPlaylistsByProvider: Partial<Record<ProviderId, Playlist[]>>
-): LibraryPlaylistCategory[] {
-  return (Object.keys(playlistCategoryMeta) as PlaylistCategoryId[]).flatMap((categoryId) => {
-    const providers = remoteProviderIds
-      .filter((providerId) => providerPlaylistsByProvider[providerId] !== undefined)
-      .map((providerId) => {
-      const playlists = (providerPlaylistsByProvider[providerId] ?? []).filter(
-        (playlist) => getPlaylistCategoryId(playlist) === categoryId
-      );
-      return { providerId, playlists };
-    });
+function PlaylistNavItem({ playlist, selected, onOpen, index = 0 }: { playlist: Playlist; selected: boolean; onOpen: () => void; index?: number }) {
+  const [coverBroken, setCoverBroken] = useState(false);
+  useEffect(() => {
+    setCoverBroken(false);
+  }, [playlist.coverUrl]);
 
-    if (providers.length === 0 || providers.every((provider) => provider.playlists.length === 0)) {
-      return [];
-    }
+  const hasCover = Boolean(playlist.coverUrl) && !coverBroken;
 
-    return [{
-      id: categoryId,
-      title: playlistCategoryMeta[categoryId].title,
-      ariaLabel: playlistCategoryMeta[categoryId].ariaLabel,
-      providers
-    }];
-  });
-}
-
-function getPlaylistCategoryId(playlist: Playlist): PlaylistCategoryId {
-  if (playlist.ownership) {
-    return playlist.ownership;
-  }
-
-  return isProviderLikedPlaylist(playlist) ? 'liked' : 'created';
-}
-
-function isPrimaryNavViewActive(view: AppView, primaryView: PrimaryNavView): boolean {
-  if (primaryView === 'home') {
-    return view.type === 'home' || view.type === 'recommendationCollection';
-  }
-
-  if (primaryView === 'charts') {
-    return view.type === 'charts' || view.type === 'chart';
-  }
-
-  return view.type === 'playlistDiscovery';
-}
-
-function isPlaylistViewActive(view: AppView, playlist: Playlist): boolean {
-  return view.type === 'playlist'
-    && view.providerId === playlist.providerId
-    && view.playlistId === playlist.id;
+  return (
+    <button
+      className={`playlist-nav-item ${selected ? 'active' : ''}`}
+      onClick={onOpen}
+      title={playlist.title}
+      aria-current={selected ? 'true' : undefined}
+      style={{ '--i': Math.min(index, 10) } as React.CSSProperties}
+    >
+      {hasCover ? (
+        <img
+          className="playlist-nav-cover"
+          ref={imageRevealRef}
+          src={playlist.coverUrl}
+          alt=""
+          loading="lazy"
+          onLoad={onImageReveal}
+          onError={(e) => {
+            setCoverBroken(true);
+            onImageReveal(e);
+          }}
+        />
+      ) : null}
+      <span className="playlist-nav-title">{formatPlaylistTitle(playlist.title)}</span>
+    </button>
+  );
 }

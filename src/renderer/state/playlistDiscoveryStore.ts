@@ -1,292 +1,170 @@
 import { create } from 'zustand';
-import type {
-  DiscoveredPlaylist,
-  PlaylistCategory,
-  RemoteProviderId
-} from '../../shared/musicTypes';
-import type { ProviderFetchOptions } from '../../shared/providerTypes';
+import type { DiscoveredPlaylist, PlaylistCategory, RemoteProviderId } from '../../shared/musicTypes';
+import type { LoadStatus } from './loadStatus';
 
-export interface PlaylistDiscoveryCollection {
-  playlists: DiscoveredPlaylist[];
-  total: number;
-  nextOffset: number;
-  hasMore: boolean;
-  isLoading: boolean;
-  loadingKind: PlaylistDiscoveryLoadingKind;
-  loaded: boolean;
-  errorMessage: string | null;
-  lastAccessedAt: number;
+export interface PlaylistDiscoveryState {
+  categoriesByProvider: Record<string, PlaylistCategory[]>;
+  playlistsByKey: Record<string, DiscoveredPlaylist[]>;
+  hasMoreByKey: Record<string, boolean>;
+  nextOffsetByKey: Record<string, number>;
+  loadingCategories: Record<string, boolean>;
+  loadingPlaylists: Record<string, boolean>;
+  categoryErrors: Record<string, string | null>;
+  playlistErrors: Record<string, string | null>;
+  statusCategoriesByProvider: Record<string, LoadStatus>;
+  statusPlaylistsByKey: Record<string, LoadStatus>;
+  loadedAtCategories: Record<string, number>;
+  lastProviderId: RemoteProviderId;
+
+  loadCategories(providerId: RemoteProviderId): Promise<void>;
+  loadPlaylists(providerId: RemoteProviderId, categoryId: string, mode: 'initial' | 'append'): Promise<void>;
+  setLastProvider(providerId: RemoteProviderId): void;
 }
 
-export type PlaylistDiscoveryLoadingKind = 'initial' | 'refresh' | 'append' | null;
-
-interface PlaylistDiscoveryLoadOptions extends ProviderFetchOptions {
-  append?: boolean;
-}
-
-interface PlaylistDiscoveryState {
-  categoriesByProvider: Record<RemoteProviderId, PlaylistCategory[]>;
-  categoriesLoadingByProvider: Record<RemoteProviderId, boolean>;
-  categoriesErrorByProvider: Record<RemoteProviderId, string | null>;
-  categoriesLoadedByProvider: Record<RemoteProviderId, boolean>;
-  collectionsByKey: Record<string, PlaylistDiscoveryCollection>;
-  lastProviderId: RemoteProviderId | null;
-  loadCategories: (
-    providerId: RemoteProviderId,
-    options?: ProviderFetchOptions
-  ) => Promise<PlaylistCategory[]>;
-  loadPlaylists: (
-    providerId: RemoteProviderId,
-    categoryId: string,
-    options?: PlaylistDiscoveryLoadOptions
-  ) => Promise<DiscoveredPlaylist[]>;
-  setLastProviderId: (providerId: RemoteProviderId) => void;
-  resetForTest: () => void;
-}
-
-const PLAYLIST_DISCOVERY_PROVIDER_STORAGE_KEY = 'musicplayer.playlist-discovery-provider';
-const PLAYLIST_DISCOVERY_PAGE_SIZE = 30;
-const MAX_INACTIVE_DISCOVERY_COLLECTIONS = 8;
-
-export const EMPTY_PLAYLIST_DISCOVERY_COLLECTION: PlaylistDiscoveryCollection = {
-  playlists: [],
-  total: 0,
-  nextOffset: 0,
-  hasMore: false,
-  isLoading: false,
-  loadingKind: null,
-  loaded: false,
-  errorMessage: null,
-  lastAccessedAt: 0
-};
-
-export function getPlaylistDiscoveryCollectionKey(
-  providerId: RemoteProviderId,
-  categoryId: string
-): string {
-  return `${providerId}:${encodeURIComponent(categoryId)}`;
-}
+const PAGE_SIZE = 30;
+const CATEGORY_TTL_MS = 10 * 60 * 1000;
+const revisionByKey: Record<string, number> = {};
 
 export const usePlaylistDiscoveryStore = create<PlaylistDiscoveryState>((set, get) => ({
-  ...createPlaylistDiscoveryDataState(readStoredProviderId()),
+  categoriesByProvider: {},
+  playlistsByKey: {},
+  hasMoreByKey: {},
+  nextOffsetByKey: {},
+  loadingCategories: {},
+  loadingPlaylists: {},
+  categoryErrors: {},
+  playlistErrors: {},
+  statusCategoriesByProvider: {},
+  statusPlaylistsByKey: {},
+  loadedAtCategories: {},
+  lastProviderId: 'netease',
 
-  loadCategories: async (providerId, options) => {
-    const currentState = get();
-    if (currentState.categoriesLoadingByProvider[providerId]) {
-      return currentState.categoriesByProvider[providerId];
-    }
-    if (!options?.forceRefresh && currentState.categoriesLoadedByProvider[providerId]) {
-      return currentState.categoriesByProvider[providerId];
-    }
+  async loadCategories(providerId) {
+    const loadedAt = get().loadedAtCategories[providerId];
+    if (loadedAt && Date.now() - loadedAt < CATEGORY_TTL_MS) return;
+    if (get().loadingCategories[providerId]) return;
+    const revision = (revisionByKey[`${providerId}:categories`] = (revisionByKey[`${providerId}:categories`] ?? 0) + 1);
 
     set((state) => ({
-      categoriesLoadingByProvider: {
-        ...state.categoriesLoadingByProvider,
-        [providerId]: true
-      },
-      categoriesErrorByProvider: {
-        ...state.categoriesErrorByProvider,
-        [providerId]: null
-      }
+      loadingCategories: { ...state.loadingCategories, [providerId]: true },
+      categoryErrors: { ...state.categoryErrors, [providerId]: null },
+      statusCategoriesByProvider: { ...state.statusCategoriesByProvider, [providerId]: 'loading' }
     }));
 
-    const result = options
-      ? await window.musicPlayer.music.getPlaylistCategories(providerId, options)
-      : await window.musicPlayer.music.getPlaylistCategories(providerId);
-    if (!result.ok) {
+    try {
+      const result = await window.musicPlayer.music.getPlaylistCategories(providerId);
+      if (revision !== revisionByKey[`${providerId}:categories`]) return;
+      if (result.ok) {
+        set((state) => ({
+          categoriesByProvider: { ...state.categoriesByProvider, [providerId]: result.data },
+          statusCategoriesByProvider: {
+            ...state.statusCategoriesByProvider,
+            [providerId]: result.data.length > 0 ? 'success' : 'success-empty'
+          },
+          loadedAtCategories: { ...state.loadedAtCategories, [providerId]: Date.now() }
+        }));
+      } else {
+        set((state) => ({
+          categoryErrors: { ...state.categoryErrors, [providerId]: result.error.message },
+          statusCategoriesByProvider: { ...state.statusCategoriesByProvider, [providerId]: 'error' }
+        }));
+      }
+    } catch (error) {
+      if (revision !== revisionByKey[`${providerId}:categories`]) return;
       set((state) => ({
-        categoriesLoadingByProvider: {
-          ...state.categoriesLoadingByProvider,
-          [providerId]: false
+        categoryErrors: {
+          ...state.categoryErrors,
+          [providerId]: error instanceof Error ? error.message : String(error)
         },
-        categoriesErrorByProvider: {
-          ...state.categoriesErrorByProvider,
-          [providerId]: result.error.message
-        }
+        statusCategoriesByProvider: { ...state.statusCategoriesByProvider, [providerId]: 'error' }
       }));
-      return [];
-    }
-
-    set((state) => ({
-      categoriesByProvider: {
-        ...state.categoriesByProvider,
-        [providerId]: result.data
-      },
-      categoriesLoadingByProvider: {
-        ...state.categoriesLoadingByProvider,
-        [providerId]: false
-      },
-      categoriesErrorByProvider: {
-        ...state.categoriesErrorByProvider,
-        [providerId]: null
-      },
-      categoriesLoadedByProvider: {
-        ...state.categoriesLoadedByProvider,
-        [providerId]: true
+    } finally {
+      if (revision === revisionByKey[`${providerId}:categories`]) {
+        set((state) => ({ loadingCategories: { ...state.loadingCategories, [providerId]: false } }));
       }
-    }));
-    return result.data;
+    }
   },
 
-  loadPlaylists: async (providerId, categoryId, options) => {
-    const collectionKey = getPlaylistDiscoveryCollectionKey(providerId, categoryId);
-    const currentCollection = get().collectionsByKey[collectionKey] ?? EMPTY_PLAYLIST_DISCOVERY_COLLECTION;
-    const shouldAppend = Boolean(options?.append && !options.forceRefresh);
-    if (currentCollection.isLoading) {
-      return currentCollection.playlists;
-    }
-    if (shouldAppend && currentCollection.loaded && !currentCollection.hasMore) {
-      return currentCollection.playlists;
-    }
-    if (!shouldAppend && !options?.forceRefresh && currentCollection.loaded) {
-      return currentCollection.playlists;
-    }
+  async loadPlaylists(providerId, categoryId, mode) {
+    const key = `${providerId}:${categoryId}`;
+    if (get().loadingPlaylists[key]) return;
+    const offset = mode === 'append' ? (get().nextOffsetByKey[key] ?? 0) : 0;
+    const revision = (revisionByKey[key] = (revisionByKey[key] ?? 0) + 1);
 
-    const offset = shouldAppend ? currentCollection.nextOffset : 0;
-    const loadingKind: PlaylistDiscoveryLoadingKind = shouldAppend
-      ? 'append'
-      : options?.forceRefresh && currentCollection.loaded
-        ? 'refresh'
-        : 'initial';
     set((state) => ({
-      collectionsByKey: {
-        ...state.collectionsByKey,
-        [collectionKey]: {
-          ...currentCollection,
-          isLoading: true,
-          loadingKind,
-          errorMessage: null,
-          lastAccessedAt: Date.now()
-        }
+      loadingPlaylists: { ...state.loadingPlaylists, [key]: true },
+      playlistErrors: { ...state.playlistErrors, [key]: null },
+      statusPlaylistsByKey: {
+        ...state.statusPlaylistsByKey,
+        [key]: mode === 'append' ? 'appending' : (get().playlistsByKey[key]?.length ? 'refreshing' : 'loading')
       }
     }));
 
-    const query = {
-      categoryId,
-      limit: PLAYLIST_DISCOVERY_PAGE_SIZE,
-      offset
-    };
-    const result = options?.forceRefresh
-      ? await window.musicPlayer.music.getDiscoveredPlaylists(providerId, query, { forceRefresh: true })
-      : await window.musicPlayer.music.getDiscoveredPlaylists(providerId, query);
-    if (!result.ok) {
-      set((state) => ({
-      collectionsByKey: {
-        ...pruneInactiveCollections(state.collectionsByKey, collectionKey),
-        [collectionKey]: {
-          ...(state.collectionsByKey[collectionKey] ?? currentCollection),
-          isLoading: false,
-          loadingKind: null,
-          errorMessage: result.error.message,
-          lastAccessedAt: Date.now()
+    try {
+      const result = await window.musicPlayer.music.getDiscoveredPlaylists(providerId, {
+        categoryId,
+        limit: PAGE_SIZE,
+        offset
+      });
+      if (revision !== revisionByKey[key]) return;
+      if (result.ok) {
+        const page = result.data;
+        set((state) => {
+          const existing = state.playlistsByKey[key] ?? [];
+          let merged: DiscoveredPlaylist[];
+          if (mode === 'append') {
+            const seen = new Set(existing.map((p) => p.id));
+            merged = [...existing];
+            for (const playlist of page.playlists) {
+              if (!seen.has(playlist.id)) {
+                seen.add(playlist.id);
+                merged.push(playlist);
+              }
+            }
+          } else {
+            const seen = new Set<string>();
+            merged = [];
+            for (const playlist of page.playlists) {
+              if (!seen.has(playlist.id)) {
+                seen.add(playlist.id);
+                merged.push(playlist);
+              }
+            }
           }
-        }
-      }));
-      return currentCollection.playlists;
-    }
-
-    const playlists = shouldAppend
-      ? mergeUniquePlaylists(currentCollection.playlists, result.data.playlists)
-      : result.data.playlists;
-    const consumedCount = result.data.playlists.length || result.data.limit;
-    set((state) => ({
-      collectionsByKey: {
-        ...pruneInactiveCollections(state.collectionsByKey, collectionKey),
-        [collectionKey]: {
-          playlists,
-          total: result.data.total,
-          nextOffset: result.data.offset + consumedCount,
-          hasMore: result.data.hasMore,
-          isLoading: false,
-          loadingKind: null,
-          loaded: true,
-          errorMessage: null,
-          lastAccessedAt: Date.now()
-        }
+          const nextOffset = page.offset + page.playlists.length;
+          return {
+            playlistsByKey: { ...state.playlistsByKey, [key]: merged },
+            hasMoreByKey: { ...state.hasMoreByKey, [key]: page.hasMore },
+            nextOffsetByKey: { ...state.nextOffsetByKey, [key]: nextOffset },
+            statusPlaylistsByKey: {
+              ...state.statusPlaylistsByKey,
+              [key]: merged.length > 0 ? 'success' : 'success-empty'
+            }
+          };
+        });
+      } else {
+        set((state) => ({
+          playlistErrors: { ...state.playlistErrors, [key]: result.error.message },
+          statusPlaylistsByKey: { ...state.statusPlaylistsByKey, [key]: 'error' }
+        }));
       }
-    }));
-    return playlists;
+    } catch (error) {
+      if (revision !== revisionByKey[key]) return;
+      set((state) => ({
+        playlistErrors: {
+          ...state.playlistErrors,
+          [key]: error instanceof Error ? error.message : String(error)
+        },
+        statusPlaylistsByKey: { ...state.statusPlaylistsByKey, [key]: 'error' }
+      }));
+    } finally {
+      if (revision === revisionByKey[key]) {
+        set((state) => ({ loadingPlaylists: { ...state.loadingPlaylists, [key]: false } }));
+      }
+    }
   },
 
-  setLastProviderId: (lastProviderId) => {
-    set({ lastProviderId });
-    writeStoredProviderId(lastProviderId);
-  },
-
-  resetForTest: () => set(createPlaylistDiscoveryDataState(null))
+  setLastProvider(providerId) {
+    set({ lastProviderId: providerId });
+  }
 }));
-
-function createPlaylistDiscoveryDataState(lastProviderId: RemoteProviderId | null) {
-  return {
-    categoriesByProvider: {
-      qq: [],
-      netease: []
-    },
-    categoriesLoadingByProvider: {
-      qq: false,
-      netease: false
-    },
-    categoriesErrorByProvider: {
-      qq: null,
-      netease: null
-    },
-    categoriesLoadedByProvider: {
-      qq: false,
-      netease: false
-    },
-    collectionsByKey: {},
-    lastProviderId
-  };
-}
-
-function mergeUniquePlaylists(
-  currentPlaylists: DiscoveredPlaylist[],
-  incomingPlaylists: DiscoveredPlaylist[]
-): DiscoveredPlaylist[] {
-  const playlistsById = new Map(currentPlaylists.map((playlist) => [playlist.id, playlist]));
-  incomingPlaylists.forEach((playlist) => playlistsById.set(playlist.id, playlist));
-  return [...playlistsById.values()];
-}
-
-function pruneInactiveCollections(
-  collectionsByKey: Record<string, PlaylistDiscoveryCollection>,
-  activeCollectionKey: string
-): Record<string, PlaylistDiscoveryCollection> {
-  const inactiveEntries = Object.entries(collectionsByKey)
-    .filter(([collectionKey, collection]) => collectionKey !== activeCollectionKey && !collection.isLoading)
-    .sort(([, left], [, right]) => left.lastAccessedAt - right.lastAccessedAt);
-  const overflowCount = Math.max(0, inactiveEntries.length - MAX_INACTIVE_DISCOVERY_COLLECTIONS);
-  if (overflowCount === 0) {
-    return collectionsByKey;
-  }
-
-  const expiredKeys = new Set(inactiveEntries.slice(0, overflowCount).map(([collectionKey]) => collectionKey));
-  return Object.fromEntries(
-    Object.entries(collectionsByKey).filter(([collectionKey]) => !expiredKeys.has(collectionKey))
-  );
-}
-
-function readStoredProviderId(): RemoteProviderId | null {
-  if (typeof localStorage === 'undefined') {
-    return null;
-  }
-
-  try {
-    const providerId = localStorage.getItem(PLAYLIST_DISCOVERY_PROVIDER_STORAGE_KEY);
-    return providerId === 'qq' || providerId === 'netease' ? providerId : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredProviderId(providerId: RemoteProviderId): void {
-  if (typeof localStorage === 'undefined') {
-    return;
-  }
-
-  try {
-    localStorage.setItem(PLAYLIST_DISCOVERY_PROVIDER_STORAGE_KEY, providerId);
-  } catch {
-    // The selected provider still updates when local storage is unavailable.
-  }
-}

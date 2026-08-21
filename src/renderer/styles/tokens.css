@@ -1,0 +1,239 @@
+/**
+ * Aether Flow 设计系统设计令牌 (Design Tokens)
+ * 针对 Electron 桌面应用窗口特化：统一高斯模糊、苹果级物理缓动与层次圆角
+ */
+:root {
+  --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  
+  /* 苹果 Apple-tier 物理缓动与弹性时间 */
+  --ease-desktop-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-desktop-in-out: cubic-bezier(0.45, 0, 0.15, 1);
+  --ease-spring-gentle: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-lyrics-spring: cubic-bezier(0.32, 1.25, 0.32, 1);
+
+  /* 调整动效时长 */
+  --duration-micro: 180ms;
+  --duration-normal: 320ms;
+  --duration-page: 480ms;
+  --duration-lyrics: 620ms;
+
+  /* 📐 层次化圆角设计规范 */
+  --radius-drawer: 20px;
+  --radius-xl: 20px;
+  --radius-lg: 14px;
+  --radius-md: 10px;
+  --radius-sm: 8px;
+  --radius-xs: 5px;
+  --radius-pill: 9999px;
+
+  /* 统一深度与光影系统 */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.16);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.28);
+  --shadow-float: 0 20px 50px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border-light);
+  --shadow-glow-accent: 0 8px 28px var(--accent-glow);
+
+  /* 🌟 全局统一的高斯模糊标准 (Unified Backdrop Blur Standard) */
+  --blur-overlay: blur(28px) saturate(180%);
+  --blur-strong: blur(40px) saturate(190%);
+  --blur-lyrics: blur(72px) saturate(220%);
+
+  /* 1. 默认主题：暗夜曜黑 (Dark Onyx) */
+  --bg-app: #0c0d14;
+  --bg-sidebar: rgba(18, 20, 29, 0.82);
+  --bg-topbar: rgba(18, 20, 29, 0.78);
+  --bg-card: rgba(255, 255, 255, 0.05);
+  --bg-card-hover: rgba(255, 255, 255, 0.09);
+  --bg-active: rgba(255, 255, 255, 0.15);
+  --bg-panel: rgba(20, 23, 34, 0.94);
+  --bg-glass: rgba(255, 255, 255, 0.06);
+  --bg-glass-strong: rgba(255, 255, 255, 0.12);
+  --popover-bg: rgba(26, 30, 44, 0.96);
+
+  /* 歌词页专用色彩 (深色) */
+  --lyrics-overlay-bg: #08090d;
+  --lyrics-overlay-bg-solid: #08090d;
+  --lyrics-text-active: #ffffff;
+  --lyrics-text-inactive: rgba(255, 255, 255, 0.35);
+  --lyrics-text-hover: rgba(255, 255, 255, 0.75);
+  --lyrics-text-unsung: rgba(255, 255, 255, 0.52);
+  --lyrics-trans-active: rgba(255, 255, 255, 0.8);
+  --lyrics-trans-inactive: rgba(255, 255, 255, 0.28);
+  --lyrics-header-text: rgba(255, 255, 255, 0.88);
+
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.75);
+  --text-tertiary: rgba(255, 255, 255, 0.48);
+  --text-muted: rgba(255, 255, 255, 0.28);
+
+  --border-light: rgba(255, 255, 255, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --border-focus: rgba(255, 255, 255, 0.25);
+
+  --accent-primary: #f43f5e;
+  --accent-secondary: #8b5cf6;
+  --accent-gradient: linear-gradient(135deg, #f43f5e 0%, #8b5cf6 100%);
+  --accent-glow: rgba(244, 63, 94, 0.35);
+
+  --btn-solid-bg: #ffffff;
+  --btn-solid-text: #0c0d12;
+  --btn-solid-hover: #f1f2f6;
+
+  /* 状态色（语义化） */
+  --color-success: #34c77b;
+  --color-warning: #f5a623;
+  --color-danger: #f43f5e;
+
+  /* Toast / 提示专用 */
+  --toast-bg: #1b1e2a;
+  --toast-text: #ffffff;
+  --toast-border: rgba(255, 255, 255, 0.1);
+  --toast-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+
+  /* 详情 Hero 专用 */
+  --detail-hero-bg: rgba(255, 255, 255, 0.045);
+  --detail-hero-fg: #ffffff;
+  --detail-hero-muted: rgba(255, 255, 255, 0.72);
+  --detail-hero-border: rgba(255, 255, 255, 0.08);
+  --detail-hero-scrim: rgba(0, 0, 0, 0.35);
+
+  /* 层级（集中定义） */
+  --z-topbar: 9;
+  --z-sidebar: 10;
+  --z-drawer-overlay: 14;
+  --z-drawer: 15;
+  --z-player: 20;
+  --z-dropdown: 1500;
+  --z-lyrics: 1000;
+  --z-modal: 2000;
+  --z-toast: 3000;
+  --z-context-menu: 5000;
+
+  /* 焦点环 */
+  --focus-ring: 0 0 0 2.5px var(--accent-glow);
+}
+
+/* 2. 主题：极简皓白 (Clean Ivory - 高对比反色) */
+[data-theme="light"] {
+  --bg-app: #f4f5f9;
+  --bg-sidebar: rgba(255, 255, 255, 0.88);
+  --bg-topbar: rgba(255, 255, 255, 0.82);
+  --bg-card: rgba(0, 0, 0, 0.035);
+  --bg-card-hover: rgba(0, 0, 0, 0.065);
+  --bg-active: rgba(0, 0, 0, 0.09);
+  --bg-panel: rgba(255, 255, 255, 0.96);
+  --bg-glass: rgba(0, 0, 0, 0.04);
+  --bg-glass-strong: rgba(0, 0, 0, 0.08);
+  --popover-bg: rgba(255, 255, 255, 0.98);
+
+  --lyrics-overlay-bg: #f5f6fa;
+  --lyrics-overlay-bg-solid: #f5f6fa;
+  --lyrics-text-active: #0f121d;
+  --lyrics-text-inactive: rgba(15, 18, 29, 0.35);
+  --lyrics-text-hover: rgba(15, 18, 29, 0.7);
+  --lyrics-text-unsung: rgba(15, 18, 29, 0.5);
+  --lyrics-trans-active: rgba(15, 18, 29, 0.75);
+  --lyrics-trans-inactive: rgba(15, 18, 29, 0.25);
+  --lyrics-header-text: rgba(15, 18, 29, 0.88);
+
+  --text-primary: #11141d;
+  --text-secondary: rgba(17, 20, 29, 0.75);
+  --text-tertiary: rgba(17, 20, 29, 0.5);
+  --text-muted: rgba(17, 20, 29, 0.32);
+
+  --border-light: rgba(0, 0, 0, 0.08);
+  --border-subtle: rgba(0, 0, 0, 0.04);
+  --border-focus: rgba(0, 0, 0, 0.2);
+
+  --accent-primary: #e11d48;
+  --accent-secondary: #6366f1;
+  --accent-gradient: linear-gradient(135deg, #e11d48 0%, #6366f1 100%);
+  --accent-glow: rgba(225, 29, 72, 0.22);
+
+  --btn-solid-bg: #11141d;
+  --btn-solid-text: #ffffff;
+  --btn-solid-hover: #232736;
+
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #e11d48;
+
+  --toast-bg: #ffffff;
+  --toast-text: #11141d;
+  --toast-border: rgba(0, 0, 0, 0.08);
+  --toast-shadow: 0 16px 48px rgba(17, 20, 29, 0.18);
+
+  --detail-hero-bg: rgba(0, 0, 0, 0.035);
+  --detail-hero-fg: #11141d;
+  --detail-hero-muted: rgba(17, 20, 29, 0.72);
+  --detail-hero-border: rgba(0, 0, 0, 0.08);
+  --detail-hero-scrim: rgba(0, 0, 0, 0.18);
+}
+
+/* 全局重置 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color var(--duration-normal) var(--ease-desktop-out), color var(--duration-normal);
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: inherit;
+  outline: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+button:focus-visible,
+input:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+input {
+  font-family: inherit;
+  border: none;
+  outline: none;
+  color: inherit;
+  background: transparent;
+}
+
+/* 桌面极细顺滑滚动条 */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-pill);
+  transition: background var(--duration-micro);
+}
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
+}

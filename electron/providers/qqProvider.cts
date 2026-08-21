@@ -7,15 +7,19 @@ import type {
   AlbumSummary,
   ArtistDetail,
   ArtistReference,
+  ArtistSongsPage,
   ArtistSummary,
   ChartSummary,
   DiscoveredPlaylist,
+  LoginQrPollResult,
+  LoginQrSession,
   LoginStatus,
   LyricsResult,
   MusicProvider,
   PlaybackRestriction,
   Playlist,
   PlaylistCategory,
+  PlaylistDetail,
   PlaylistDiscoveryPage,
   PlaylistDiscoveryQuery,
   ProviderFetchOptions,
@@ -62,6 +66,18 @@ const QQ_PLAYLIST_REFERER = 'https://y.qq.com/portal/playlist.html';
 const QQ_SIGNED_REQUEST_PAGE_URL = 'https://y.qq.com/n/ryqq/';
 const QQ_WEB_REQUEST_MODULE_ID = 8;
 const QQ_ACCOUNT_COOKIE_PROBE_URLS = [QQ_LOGIN_URL, 'https://ptlogin2.qq.com/'] as const;
+const QQ_QR_SHOW_URL = 'https://xui.ptlogin2.qq.com/ssl/ptqrshow';
+const QQ_QR_LOGIN_URL = 'https://xui.ptlogin2.qq.com/ssl/ptqrlogin';
+const QQ_QR_APP_ID = '716027609';
+const QQ_QR_DAID = '383';
+const QQ_QR_PT_3RD_AID = '100497308';
+const QQ_QR_REDIRECT_TARGET = 'https://graph.qq.com/oauth2.0/login_jump';
+const QQ_QR_JS_VERSION = '26071711';
+const QQ_QR_JS_FRAMEWORK_VERSION = 'c1987b96';
+const QQ_QR_EXPIRES_IN_MS = 2 * 60_000;
+const QQ_QRSIG_COOKIE_URL = 'https://ssl.ptlogin2.qq.com/';
+const QQ_QR_SESSION_COOKIE_URL = 'https://xui.ptlogin2.qq.com/';
+const QQ_OAUTH_REDIRECT_URI = 'https://y.qq.com/portal/wx_redirect.html?login_type=1&surl=https%3A%2F%2Fy.qq.com%2F';
 
 export interface QQCookie {
   name: string;
@@ -70,6 +86,7 @@ export interface QQCookie {
 
 export interface QQRuntime {
   openLoginWindow(options: { partition: string; url: string }): Promise<void>;
+  completeLoginCallback(options: { partition: string; url: string; refererUrl: string; qrsig: string }): Promise<void>;
   getCookies(partition: string, url: string): Promise<QQCookie[]>;
   requestJson<T>(request: {
     partition: string;
@@ -79,6 +96,16 @@ export interface QQRuntime {
     json?: unknown;
     anonymous?: boolean;
   }): Promise<T>;
+  requestText(request: {
+    partition: string;
+    url: string;
+    headers?: Record<string, string>;
+  }): Promise<string>;
+  requestBuffer(request: {
+    partition: string;
+    url: string;
+    headers?: Record<string, string>;
+  }): Promise<Buffer>;
   requestSignedMusicu<T>(request: {
     partition: string;
     module: string;
@@ -92,6 +119,9 @@ export function createQQProvider(
   runtime: QQRuntime = createElectronQQRuntime(),
   cache: CacheStore = createMemoryCacheStore()
 ): MusicProvider {
+  let activeQrSession: QQQrSession | null = null;
+  const inFlightQrPolls = new Map<string, Promise<LoginQrPollResult>>();
+
   return {
     id: 'qq',
     capabilities: {
@@ -117,6 +147,9 @@ export function createQQProvider(
         },
         getAlbumDetail(albumId, options = {}) {
           return getAlbumDetail(runtime, cache, albumId, options);
+        },
+        getArtistSongsPage(artistId, offset, options = {}) {
+          return getArtistSongsPage(runtime, artistId, offset, options);
         }
       },
       recommendations: {
@@ -156,6 +189,37 @@ export function createQQProvider(
       return getLoginStatus(runtime, cache);
     },
 
+    async createLoginQr() {
+      const session = await createQQLoginQr(runtime);
+      activeQrSession = session;
+      return session.publicSession;
+    },
+
+    async pollLoginQr(key) {
+      const existingPoll = inFlightQrPolls.get(key);
+      if (existingPoll) {
+        return existingPoll;
+      }
+
+      const pollTask = pollQQLoginQr(runtime, cache, activeQrSession, key)
+        .finally(() => {
+          inFlightQrPolls.delete(key);
+        });
+      inFlightQrPolls.set(key, pollTask);
+
+      const result = await pollTask;
+      if (result.state === 'success' || result.state === 'expired' || result.state === 'failed') {
+        activeQrSession = null;
+      }
+      return result;
+    },
+
+    async cancelLoginQr(key) {
+      if (activeQrSession && activeQrSession.key === key) {
+        activeQrSession = null;
+      }
+    },
+
     async logout() {
       await runtime.clearSession(QQ_LOGIN_PARTITION);
       cache.deleteByPrefix(CACHE_KEYS.providerPrefix('qq'));
@@ -188,37 +252,12 @@ export function createQQProvider(
     },
 
     async getPlaylistTracks(playlistId, options = {}) {
-      const platformPlaylistId = parseProviderScopedId(playlistId);
-      const providerScopedPlaylistId = createProviderScopedId(platformPlaylistId);
-      const cacheKey = CACHE_KEYS.playlistTracks('qq', providerScopedPlaylistId);
-      if (options.forceRefresh) {
-        cache.delete(cacheKey);
-      }
+      const detail = await loadQQPlaylistDetail(runtime, cache, playlistId, options);
+      return detail.tracks;
+    },
 
-      return cache.getOrSet(cacheKey, CACHE_TTL_MS.playlistTracks, async () => {
-        const sessionIdentity = await getQQSessionIdentity(runtime, QQ_PLAYLIST_DETAIL_URL);
-        const userId = sessionIdentity.loggedIn && sessionIdentity.userId ? sessionIdentity.userId : '0';
-        const response = await runtime.requestJson<QQPlaylistDetailResponse>({
-          partition: QQ_LOGIN_PARTITION,
-          url: createPlaylistDetailUrl(platformPlaylistId, userId)
-        });
-        if (response.code !== 0 || response.req_0?.code !== 0) {
-          throw new Error('QQ 音乐歌单详情请求失败');
-        }
-
-        const detail = response.req_0?.data;
-        const legacyDetail = response.cdlist?.[0];
-        const playlistTitle = firstText(
-          detail?.dirinfo?.title,
-          legacyDetail?.dissname,
-          legacyDetail?.diss_name,
-          legacyDetail?.name
-        ) || 'QQ 音乐歌单';
-
-        return (detail?.songlist ?? legacyDetail?.songlist ?? [])
-          .map((track) => mapTrack(track, providerScopedPlaylistId, playlistTitle))
-          .filter((song): song is Song => Boolean(song));
-      });
+    async getPlaylistDetail(playlistId, options = {}) {
+      return loadQQPlaylistDetail(runtime, cache, playlistId, options);
     },
 
     async getSongUrl(song, quality) {
@@ -320,13 +359,16 @@ async function searchEntities(
 
   const result: SearchEntityResults = await (async (): Promise<SearchEntityResults> => {
     const requestedTypes = new Set(query.entityTypes);
-    const [songs, albums] = await Promise.all([
+    const [songs, albums, artists] = await Promise.all([
       requestedTypes.has('song')
         ? resolveQQSearchSection(() => getQQSongSearchSection(runtime, query))
         : Promise.resolve(createSearchEntitySection<Song>(true)),
       requestedTypes.has('album')
         ? resolveQQSearchSection(() => getQQAlbumSearchSection(runtime, query))
-        : Promise.resolve(createSearchEntitySection<AlbumSummary>(true))
+        : Promise.resolve(createSearchEntitySection<AlbumSummary>(true)),
+      requestedTypes.has('artist')
+        ? resolveQQSearchSection(() => getQQArtistSearchSection(runtime, query))
+        : Promise.resolve(createSearchEntitySection<ArtistSummary>(true))
     ]);
 
     return {
@@ -334,8 +376,10 @@ async function searchEntities(
       keyword: query.keyword,
       sections: {
         songs,
-        artists: createSearchEntitySection<ArtistSummary>(false),
+        artists,
         albums,
+        // QQ 无歌单搜索接口（search_for_qq_cp 类型码 0=歌曲/8=专辑，smartbox 无 playlist group，
+        // wesearchface H5 接口已废弃），如实标记不可用
         playlists: createSearchEntitySection<DiscoveredPlaylist>(false)
       }
     };
@@ -401,6 +445,55 @@ async function getQQAlbumSearchSection(
   }
 
   return createSearchEntitySection(true, albums, getQQSearchTotal(response.data?.album), query);
+}
+
+/**
+ * QQ 无正式的歌手搜索列表接口（search_for_qq_cp 仅支持歌曲 t=0 与专辑 t=8）。
+ * 退路方案：使用 smartbox 的热门歌手条目作为第一页（已验证字段结构）。
+ */
+async function getQQArtistSearchSection(
+  runtime: QQRuntime,
+  query: NormalizedSearchEntityQuery
+): Promise<SearchEntitySection<ArtistSummary>> {
+  const response = await runtime.requestJson<QQSmartboxResponse>({
+    partition: QQ_LOGIN_PARTITION,
+    url: createSmartboxUrl(query.keyword),
+    anonymous: true
+  });
+  if (response.code !== undefined && response.code !== 0) {
+    throw new Error('QQ音乐歌手搜索请求失败');
+  }
+
+  const rawArtists = getQQSmartboxItems(response.data?.singer);
+  const artists = rawArtists
+    .map(mapQQSmartboxArtist)
+    .filter((artist): artist is ArtistSummary => Boolean(artist));
+  if (rawArtists.length > 0 && artists.length === 0) {
+    throw new Error('QQ音乐歌手搜索数据无效');
+  }
+
+  // smartbox 只返回热门条目，无完整分页；hasMore=false，total=artists.length
+  return createSearchEntitySection(true, artists, artists.length, query);
+}
+
+function mapQQSmartboxArtist(item: QQSmartboxItem): ArtistSummary | null {
+  const platformArtistId = firstText(item.mid, item.singerMid, item.singer_mid, item.singermid, item.id);
+  const name = firstText(item.name, item.singer, item.singername, item.artistName);
+  if (!platformArtistId || !name) {
+    return null;
+  }
+
+  const imageUrl = normalizeImageUrl(firstText(item.pic, item.picurl, item.photo, item.imageUrl, item.avatarUrl));
+  return {
+    id: `qq:artist:${platformArtistId}`,
+    providerId: 'qq',
+    platformArtistId,
+    name,
+    coverTone: QQ_COVER_TONE,
+    ...(imageUrl ? { imageUrl } : {}),
+    ...(imageUrl ? {} : { imageUrl: createArtistImageUrl(platformArtistId) }),
+    sourceLabel: QQ_SOURCE_LABEL
+  };
 }
 
 function mapQQSearchAlbum(album: QQSearchAlbum): AlbumSummary | null {
@@ -642,20 +735,28 @@ async function getRecommendationHome(
 
   const loggedIn = (await getLoginStatus(runtime, cache)).loggedIn;
   const cacheKey = CACHE_KEYS.recommendationHome('qq', loggedIn);
+  // 先读走上一次成功写入的首页数据：实时刷新失败时回退到旧数据，
+  // 避免 forceRefresh 删掉良好缓存后本次请求失败导致“发现音乐整页空白”
+  const staleFeed = options.forceRefresh ? cache.peek<RecommendationHomeFeed>(cacheKey) : null;
   if (options.forceRefresh) {
     cache.delete(cacheKey);
   }
 
-  return cache.getOrSet(cacheKey, CACHE_TTL_MS.recommendationHome, async () => ({
-    providerId: 'qq',
-    loggedIn,
-    dailySongs: [],
-    newSongs: await getQQNewSongs(runtime),
-    moduleResults: {
-      daily: { status: 'skipped', errorMessage: null },
-      new: { status: 'fulfilled', errorMessage: null }
-    }
-  }));
+  try {
+    return await cache.getOrSet(cacheKey, CACHE_TTL_MS.recommendationHome, async () => ({
+      providerId: 'qq',
+      loggedIn,
+      dailySongs: [],
+      newSongs: await getQQNewSongs(runtime),
+      moduleResults: {
+        daily: { status: 'skipped', errorMessage: null },
+        new: { status: 'fulfilled', errorMessage: null }
+      }
+    }));
+  } catch (error) {
+    if (staleFeed) return staleFeed;
+    throw error;
+  }
 }
 
 async function getQQNewSongs(runtime: QQRuntime): Promise<Song[]> {
@@ -692,39 +793,45 @@ async function getNewAlbums(
   options: ProviderFetchOptions
 ): Promise<AlbumSummary[]> {
   const cacheKey = CACHE_KEYS.releaseCatalog('qq');
+  const staleAlbums = options.forceRefresh ? cache.peek<AlbumSummary[]>(cacheKey) : null;
   if (options.forceRefresh) {
     cache.delete(cacheKey);
   }
 
-  return cache.getOrSet(cacheKey, CACHE_TTL_MS.releaseCatalog, async () => {
-    const response = await runtime.requestJson<QQNewAlbumsResponse>({
-      partition: QQ_LOGIN_PARTITION,
-      url: QQ_SONG_URL,
-      method: 'POST',
-      json: {
-        comm: { ct: 24, cv: 0 },
-        new_album: {
-          module: 'newalbum.NewAlbumServer',
-          method: 'get_new_album_info',
-          param: { area: 1, sin: 0, num: 12 }
-        }
-      },
-      anonymous: true
-    });
-    if (response.code !== 0 || response.new_album?.code !== 0) {
-      throw new Error('QQ 音乐新碟速递请求失败');
-    }
+  try {
+    return await cache.getOrSet(cacheKey, CACHE_TTL_MS.releaseCatalog, async () => {
+      const response = await runtime.requestJson<QQNewAlbumsResponse>({
+        partition: QQ_LOGIN_PARTITION,
+        url: QQ_SONG_URL,
+        method: 'POST',
+        json: {
+          comm: { ct: 24, cv: 0 },
+          new_album: {
+            module: 'newalbum.NewAlbumServer',
+            method: 'get_new_album_info',
+            param: { area: 1, sin: 0, num: 12 }
+          }
+        },
+        anonymous: true
+      });
+      if (response.code !== 0 || response.new_album?.code !== 0) {
+        throw new Error('QQ 音乐新碟速递请求失败');
+      }
 
-    const rawAlbums = response.new_album.data?.albums;
-    if (!Array.isArray(rawAlbums)) {
-      throw new Error('QQ 音乐新碟速递数据无效');
-    }
-    const albums = uniqueAlbums(rawAlbums.map(mapQQNewAlbum).filter((album): album is AlbumSummary => Boolean(album)));
-    if (rawAlbums.length > 0 && albums.length === 0) {
-      throw new Error('QQ 音乐新碟速递数据无效');
-    }
-    return albums.slice(0, 12);
-  });
+      const rawAlbums = response.new_album.data?.albums;
+      if (!Array.isArray(rawAlbums)) {
+        throw new Error('QQ 音乐新碟速递数据无效');
+      }
+      const albums = uniqueAlbums(rawAlbums.map(mapQQNewAlbum).filter((album): album is AlbumSummary => Boolean(album)));
+      if (rawAlbums.length > 0 && albums.length === 0) {
+        throw new Error('QQ 音乐新碟速递数据无效');
+      }
+      return albums.slice(0, 12);
+    });
+  } catch (error) {
+    if (staleAlbums) return staleAlbums;
+    throw error;
+  }
 }
 
 function mapQQNewAlbum(album: QQNewAlbum): AlbumSummary | null {
@@ -837,6 +944,58 @@ async function getArtistDetail(
         .map((album) => mapQQAlbumSummary(album, name))
         .filter((album): album is AlbumSummary => Boolean(album))
     };
+  });
+}
+
+async function getArtistSongsPage(
+  runtime: QQRuntime,
+  artistId: string,
+  offset: number,
+  _options: ProviderFetchOptions
+): Promise<ArtistSongsPage> {
+  const platformArtistId = parseQQArtistId(artistId);
+  const providerScopedArtistId = `qq:artist:${platformArtistId}`;
+  const limit = 50;
+  const response = await runtime.requestJson<QQArtistSongsResponse>({
+    partition: QQ_LOGIN_PARTITION,
+    url: createQQArtistSongsUrl(platformArtistId, offset, limit)
+  });
+  if (response.code !== 0 || response.singer_songs?.code !== 0) {
+    throw new Error('QQ 音乐歌手歌曲列表请求失败');
+  }
+
+  const songData = response.singer_songs.data;
+  const sourceContext: SourceContext = {
+    type: 'artist',
+    providerId: 'qq',
+    artistId: providerScopedArtistId,
+    artistName: ''
+  };
+  const songs = (songData?.songList ?? [])
+    .map((song) => mapTrack(song, '', '', sourceContext))
+    .filter((song): song is Song => Boolean(song));
+  return {
+    songs,
+    hasMore: Boolean(songData?.totalNum != null && offset + songs.length < songData.totalNum),
+    nextOffset: offset + songs.length,
+    ...(normalizeNonNegativeNumber(songData?.totalNum) !== undefined
+      ? { total: normalizeNonNegativeNumber(songData?.totalNum) }
+      : {})
+  };
+}
+
+function createQQArtistSongsUrl(artistMid: string, begin: number, num: number): string {
+  return createQQMusicuUrl({
+    singer_songs: {
+      module: 'musichall.song_list_server',
+      method: 'GetSingerSongList',
+      param: {
+        singerMid: artistMid,
+        begin,
+        num,
+        order: 1
+      }
+    }
   });
 }
 
@@ -1316,6 +1475,392 @@ async function getUserPlaylists(
       .map(mapPlaylist)
       .filter((playlist): playlist is Playlist => Boolean(playlist));
   });
+}
+
+interface QQQrSession {
+  key: string;
+  expiresAtMs: number;
+  qrsig: string;
+  publicSession: LoginQrSession;
+}
+
+interface QQQrLoginTextResult {
+  code: string;
+  callbackUrl: string;
+  message: string;
+  nickname: string;
+}
+
+async function createQQLoginQr(runtime: QQRuntime): Promise<QQQrSession> {
+  const xloginUrl = createQQXLoginUrl();
+  await runtime.requestText({
+    partition: QQ_LOGIN_PARTITION,
+    url: xloginUrl
+  });
+
+  const png = await runtime.requestBuffer({
+    partition: QQ_LOGIN_PARTITION,
+    url: createQQQrShowUrl(),
+    headers: { Referer: xloginUrl }
+  });
+
+  const qrsig = await getQQQrSigCookie(runtime);
+  const key = String(Date.now());
+  const publicSession: LoginQrSession = {
+    providerId: 'qq',
+    key,
+    qrImageDataUrl: `data:image/png;base64,${png.toString('base64')}`,
+    expiresAtMs: Date.now() + QQ_QR_EXPIRES_IN_MS
+  };
+
+  return {
+    key,
+    expiresAtMs: publicSession.expiresAtMs,
+    qrsig,
+    publicSession
+  };
+}
+
+async function pollQQLoginQr(
+  runtime: QQRuntime,
+  cache: CacheStore,
+  activeSession: QQQrSession | null,
+  key: string
+): Promise<LoginQrPollResult> {
+  if (!activeSession || activeSession.key !== key) {
+    return { state: 'failed', message: '二维码会话已失效，请重新获取' };
+  }
+
+  if (Date.now() > activeSession.expiresAtMs) {
+    return { state: 'expired', message: '二维码已过期，请刷新' };
+  }
+
+  const qrsig = await getQQQrSigCookie(runtime);
+  const loginSig = await getQQQrSessionCookie(runtime, 'pt_login_sig');
+  if (!qrsig) {
+    return { state: 'expired', message: '二维码已过期，请刷新' };
+  }
+
+  const xloginUrl = createQQXLoginUrl();
+  const text = await runtime.requestText({
+    partition: QQ_LOGIN_PARTITION,
+    url: createQQQrLoginUrl(Date.now(), createQQQrHash33(qrsig), loginSig),
+    headers: { Referer: xloginUrl }
+  });
+
+  const result = parseQQQrLoginText(text);
+  switch (result.code) {
+    case '0': {
+      const successTimingStart = Date.now();
+      if (result.callbackUrl) {
+        await followQQQrLoginCallback(runtime, result.callbackUrl, activeSession?.qrsig ?? '');
+      }
+
+      cache.deleteByPrefix(CACHE_KEYS.providerPrefix('qq'));
+      const loginStatus = await getLoginStatus(runtime, cache);
+      console.info('[QQQrTiming]', {
+        step: 'get-login-status',
+        elapsedMs: Date.now() - successTimingStart
+      });
+      return {
+        state: 'success',
+        message: '登录成功',
+        loginStatus
+      };
+    }
+    case '65':
+      return { state: 'expired', message: '二维码已过期，请刷新' };
+    case '66':
+      return { state: 'waiting', message: '等待扫码' };
+    case '67':
+      return { state: 'scanned', message: '已扫码，请在手机上确认登录' };
+    default:
+      return { state: 'failed', message: result.message || 'QQ 音乐扫码登录失败' };
+  }
+}
+
+async function followQQQrLoginCallback(runtime: QQRuntime, callbackUrl: string, originalQrsig: string): Promise<void> {
+  await runtime.completeLoginCallback({
+    partition: QQ_LOGIN_PARTITION,
+    url: callbackUrl,
+    refererUrl: createQQXLoginUrl(),
+    qrsig: originalQrsig
+  });
+}
+
+async function getQQQrSigCookie(runtime: QQRuntime): Promise<string> {
+  const cookies = await runtime.getCookies(QQ_LOGIN_PARTITION, QQ_QRSIG_COOKIE_URL);
+  return createCookieMap(cookies).qrsig ?? '';
+}
+
+async function getQQQrSessionCookie(runtime: QQRuntime, name: string): Promise<string> {
+  const cookies = await runtime.getCookies(QQ_LOGIN_PARTITION, QQ_QR_SESSION_COOKIE_URL);
+  return createCookieMap(cookies)[name] ?? '';
+}
+
+function createQQXLoginUrl(): string {
+  const searchParams = new URLSearchParams({
+    appid: QQ_QR_APP_ID,
+    daid: QQ_QR_DAID,
+    style: '33',
+    login_text: '登录',
+    hide_title_bar: '1',
+    hide_border: '1',
+    target: 'self',
+    s_url: QQ_QR_REDIRECT_TARGET,
+    pt_3rd_aid: QQ_QR_PT_3RD_AID,
+    pt_feedback_link: 'https://support.qq.com/products/77942?customInfo=.appid100497308',
+    theme: '2',
+    verify_theme: ''
+  });
+  return `https://xui.ptlogin2.qq.com/cgi-bin/xlogin?${searchParams.toString()}`;
+}
+
+function createQQOauthShowUrl(): string {
+  const searchParams = new URLSearchParams({
+    which: 'Login',
+    display: 'pc',
+    response_type: 'code',
+    client_id: QQ_QR_PT_3RD_AID,
+    redirect_uri: QQ_OAUTH_REDIRECT_URI,
+    state: 'state',
+    scope: 'get_user'
+  });
+  return `https://graph.qq.com/oauth2.0/show?${searchParams.toString()}`;
+}
+
+interface QQQrAuthorizeResult {
+  status: number;
+  location: string;
+  error: string;
+}
+
+async function submitQQOauthAuthorize(callbackWindow: BrowserWindow): Promise<QQQrAuthorizeResult> {
+  try {
+    return (await callbackWindow.webContents.executeJavaScript(createQQOauthAuthorizeScript(), true)) as QQQrAuthorizeResult;
+  } catch (error) {
+    return {
+      status: 0,
+      location: '',
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+function captureQQAuthorizeRedirect(loginSession: Session): Promise<string> {
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(() => {
+      finish('');
+    }, 12_000);
+
+    function finish(redirectUrl: string) {
+      clearTimeout(timeoutId);
+      loginSession.webRequest.onBeforeRedirect(null);
+      resolve(redirectUrl);
+    }
+
+    loginSession.webRequest.onBeforeRedirect((details) => {
+      if (details.url.startsWith('https://graph.qq.com/oauth2.0/authorize') && details.redirectURL) {
+        finish(details.redirectURL);
+      }
+    });
+  });
+}
+
+async function getQQLoginMusicKeyValue(loginSession: Session): Promise<string> {
+  const cookies = await loginSession.cookies.get({ url: QQ_PROFILE_URL });
+  const cookieMap = createCookieMap(cookies);
+  return getCookieMusicKey(cookieMap);
+}
+
+async function waitForQQLoginCookies(loginSession: Session, previousMusicKey: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const currentMusicKey = await getQQLoginMusicKeyValue(loginSession);
+    if (currentMusicKey && currentMusicKey !== previousMusicKey) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+async function waitForQQGraphCookie(loginSession: Session, cookieName: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const cookies = await loginSession.cookies.get({ url: 'https://graph.qq.com/' });
+    if (cookies.some((cookie) => cookie.name === cookieName)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+function waitForQQCheckSigRedirect(loginSession: Session, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(() => {
+      finish();
+    }, timeoutMs);
+
+    function finish() {
+      clearTimeout(timeoutId);
+      loginSession.webRequest.onBeforeRedirect(null);
+      resolve();
+    }
+
+    loginSession.webRequest.onBeforeRedirect((details) => {
+      if (details.url.startsWith('https://ssl.ptlogin2.graph.qq.com/check_sig')) {
+        finish();
+      }
+    });
+  });
+}
+
+async function waitForQQWindowUrl(callbackWindow: BrowserWindow, expectedUrl: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (callbackWindow.webContents.getURL().startsWith(expectedUrl)) {
+        return;
+      }
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+function createQQOauthAuthorizeScript(): string {
+  const fixedParams = JSON.stringify({
+    response_type: 'code',
+    client_id: QQ_QR_PT_3RD_AID,
+    redirect_uri: QQ_OAUTH_REDIRECT_URI,
+    scope: 'get_user',
+    state: 'state',
+    'switch': '',
+    from_ptlogin: '1',
+    src: '1',
+    update_auth: '1',
+    openapi: '1010'
+  });
+
+  return `(function () {
+    var fixed = ${fixedParams};
+    function readCookie(name) {
+      var prefix = name + '=';
+      var parts = document.cookie.split(';');
+      for (var i = 0; i < parts.length; i += 1) {
+        var part = parts[i].trim();
+        if (part.indexOf(prefix) === 0) {
+          return part.slice(prefix.length);
+        }
+      }
+      return '';
+    }
+    function hash33(value) {
+      var hash = 5381;
+      for (var index = 0; index < value.length; index += 1) {
+        hash += (hash << 5) + value.charCodeAt(index);
+      }
+      return hash & 0x7fffffff;
+    }
+    var form = new URLSearchParams();
+    Object.keys(fixed).forEach(function (key) {
+      form.append(key, fixed[key]);
+    });
+    form.append('g_tk', String(hash33(readCookie('p_skey'))));
+    form.append('auth_time', String(Date.now()));
+    form.append('ui', readCookie('ui'));
+    return fetch('https://graph.qq.com/oauth2.0/authorize', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+      redirect: 'manual'
+    }).then(function (response) {
+      if (response.status === 200) {
+        return response.text().then(function (text) {
+          try {
+            var data = JSON.parse(text);
+            if (data && data.ret === 0 && data.callback) {
+              return { status: 200, location: data.callback, error: '' };
+            }
+          } catch (error) {
+            return { status: 200, location: '', error: text.slice(0, 300) };
+          }
+          return { status: 200, location: '', error: text.slice(0, 300) };
+        });
+      }
+      return {
+        status: response.status,
+        location: response.headers.get('location') || '',
+        error: ''
+      };
+    }).catch(function (error) {
+      return { status: 0, location: '', error: String(error) };
+    });
+  })()`;
+}
+
+function createQQQrShowUrl(): string {
+  const searchParams = new URLSearchParams({
+    appid: QQ_QR_APP_ID,
+    e: '2',
+    l: 'M',
+    s: '3',
+    d: '72',
+    v: '4',
+    t: String(Math.random()),
+    daid: QQ_QR_DAID,
+    pt_3rd_aid: QQ_QR_PT_3RD_AID,
+    u1: QQ_QR_REDIRECT_TARGET
+  });
+  return `${QQ_QR_SHOW_URL}?${searchParams.toString()}`;
+}
+
+function createQQQrLoginUrl(timestamp: number, ptqrtoken: number, loginSig: string): string {
+  const searchParams = new URLSearchParams({
+    u1: QQ_QR_REDIRECT_TARGET,
+    ptqrtoken: String(ptqrtoken),
+    ptredirect: '0',
+    h: '1',
+    t: '1',
+    g: '1',
+    from_ui: '1',
+    ptlang: '2052',
+    action: `0-0-${timestamp}`,
+    js_ver: QQ_QR_JS_VERSION,
+    js_type: '1',
+    login_sig: loginSig,
+    pt_uistyle: '40',
+    aid: QQ_QR_APP_ID,
+    daid: QQ_QR_DAID,
+    pt_3rd_aid: QQ_QR_PT_3RD_AID,
+    pt_js_version: QQ_QR_JS_FRAMEWORK_VERSION
+  });
+  return `${QQ_QR_LOGIN_URL}?${searchParams.toString()}`;
+}
+
+function createQQQrHash33(value: string): number {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash += (hash << 5) + value.charCodeAt(index);
+  }
+
+  return hash & 0x7fffffff;
+}
+
+function parseQQQrLoginText(text: string): QQQrLoginTextResult {
+  const match = /ptuiCB\('(\d+)','\d*','([^']*)','\d*','([^']*)',\s*'([^']*)'(?:,\s*'[^']*')*\)/.exec(text.trim());
+  if (!match) {
+    return { code: '-1', callbackUrl: '', message: 'QQ 音乐扫码登录响应无效', nickname: '' };
+  }
+
+  return {
+    code: match[1],
+    callbackUrl: match[2],
+    message: match[3],
+    nickname: match[4]
+  };
 }
 
 async function getLoginStatus(runtime: QQRuntime, cache: CacheStore): Promise<LoginStatus> {
@@ -1898,6 +2443,75 @@ function createElectronQQRuntime(): QQRuntime {
       await loginSession.cookies.flushStore();
     },
 
+    async completeLoginCallback({ partition, url, refererUrl, qrsig }) {
+      const electron = require('electron') as typeof import('electron');
+      const loginSession = electron.session.fromPartition(partition);
+      configureQQSession(loginSession);
+
+      const checkSigFilter = { urls: ['*://ssl.ptlogin2.graph.qq.com/check_sig*'] };
+      const handleCheckSigHeaders = (
+        details: Electron.OnBeforeSendHeadersListenerDetails,
+        callback: (response: Electron.BeforeSendResponse) => void
+      ) => {
+        const requestHeaders = { ...details.requestHeaders };
+        if (qrsig) {
+          const cookieHeader = (requestHeaders.Cookie ?? requestHeaders.cookie ?? '')
+            .split(';')
+            .map((segment) => segment.trim())
+            .filter((segment) => segment && !segment.startsWith('qrsig='))
+            .concat(`qrsig=${qrsig}`)
+            .join('; ');
+          requestHeaders.Cookie = cookieHeader;
+        }
+        requestHeaders.Referer = refererUrl;
+        callback({ requestHeaders });
+      };
+      loginSession.webRequest.onBeforeSendHeaders(checkSigFilter, handleCheckSigHeaders);
+
+      const previousMusicKey = await getQQLoginMusicKeyValue(loginSession);
+      const callbackWindow = new electron.BrowserWindow({
+        show: false,
+        skipTaskbar: true,
+        webPreferences: {
+          partition,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true
+        }
+      });
+      callbackWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+      try {
+        const timingStart = Date.now();
+        void callbackWindow.loadURL(createQQOauthShowUrl()).catch(() => undefined);
+        await waitForQQGraphCookie(loginSession, 'ui', 8_000);
+        console.info('[QQQrTiming]', { step: 'show-page', elapsedMs: Date.now() - timingStart });
+
+        void callbackWindow.loadURL(url).catch(() => undefined);
+        await waitForQQCheckSigRedirect(loginSession, 8_000);
+        await waitForQQWindowUrl(callbackWindow, 'https://graph.qq.com/oauth2.0/login_jump', 3_000);
+        console.info('[QQQrTiming]', { step: 'check-sig', elapsedMs: Date.now() - timingStart });
+
+        const authorizeRedirectPromise = captureQQAuthorizeRedirect(loginSession);
+        const authorizeResult = await submitQQOauthAuthorize(callbackWindow);
+        const redirectUrl = (await authorizeRedirectPromise) || authorizeResult.location;
+        console.info('[QQQrTiming]', { step: 'authorize', elapsedMs: Date.now() - timingStart });
+        if (!redirectUrl) {
+          throw new Error('QQ 音乐授权跳转未返回');
+        }
+
+        await callbackWindow.loadURL(redirectUrl);
+        await waitForQQLoginCookies(loginSession, previousMusicKey);
+        console.info('[QQQrTiming]', { step: 'login-cookies', elapsedMs: Date.now() - timingStart });
+      } finally {
+        loginSession.webRequest.onBeforeSendHeaders(checkSigFilter, null);
+        if (!callbackWindow.isDestroyed()) {
+          callbackWindow.destroy();
+        }
+        await loginSession.cookies.flushStore();
+      }
+    },
+
     async getCookies(partition, url) {
       const electron = require('electron') as typeof import('electron');
       const loginSession = electron.session.fromPartition(partition);
@@ -1941,6 +2555,30 @@ function createElectronQQRuntime(): QQRuntime {
       const loginSession = electron.session.fromPartition(partition);
       configureQQSession(loginSession);
       return requestQQSignedMusicu(electron, partition, { module, method, param });
+    },
+
+    async requestText({ partition, url, headers }) {
+      const electron = require('electron') as typeof import('electron');
+      const loginSession = electron.session.fromPartition(partition);
+      configureQQSession(loginSession);
+      const response = await loginSession.fetch(url, { headers, credentials: 'include' });
+      if (!response.ok) {
+        throw createProviderRequestError('QQ 音乐', response.status);
+      }
+
+      return response.text();
+    },
+
+    async requestBuffer({ partition, url, headers }) {
+      const electron = require('electron') as typeof import('electron');
+      const loginSession = electron.session.fromPartition(partition);
+      configureQQSession(loginSession);
+      const response = await loginSession.fetch(url, { headers, credentials: 'include' });
+      if (!response.ok) {
+        throw createProviderRequestError('QQ 音乐', response.status);
+      }
+
+      return Buffer.from(await response.arrayBuffer());
     },
 
     async clearSession(partition) {
@@ -2054,6 +2692,46 @@ function configureQQSession(loginSession: Session): void {
   if (compatibleUserAgent !== currentUserAgent) {
     loginSession.setUserAgent(compatibleUserAgent, QQ_ACCEPT_LANGUAGE);
   }
+}
+
+function waitForQQCallbackSettle(callbackWindow: BrowserWindow, settleDelayMs = 4_000, maxWaitMs = 12_000): Promise<void> {
+  return new Promise((resolve) => {
+    const webContents = callbackWindow.webContents;
+    let resolved = false;
+    let settleTimer: NodeJS.Timeout | null = null;
+    const maxTimer = setTimeout(finishWaiting, maxWaitMs);
+
+    function finishWaiting() {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      clearTimeout(maxTimer);
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+      webContents.removeListener('did-finish-load', handleFinishLoad);
+      webContents.removeListener('did-fail-load', handleFailLoad);
+      resolve();
+    }
+
+    function handleFinishLoad() {
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+      }
+      settleTimer = setTimeout(finishWaiting, settleDelayMs);
+    }
+
+    function handleFailLoad(_event: unknown, errorCode: number, _description: string, _url: string, isMainFrame: boolean) {
+      if (isMainFrame && errorCode !== -3) {
+        finishWaiting();
+      }
+    }
+
+    webContents.on('did-finish-load', handleFinishLoad);
+    webContents.on('did-fail-load', handleFailLoad);
+  });
 }
 
 function createQQBrowserUserAgent(currentUserAgent: string): string {
@@ -2341,6 +3019,86 @@ function createPlaylistDetailUrl(playlistId: string, userId: string): string {
   url.searchParams.set('needNewCode', '1');
   url.searchParams.set('data', JSON.stringify(data));
   return url.toString();
+}
+
+async function loadQQPlaylistDetail(
+  runtime: QQRuntime,
+  cache: CacheStore,
+  playlistId: string,
+  options: ProviderFetchOptions
+): Promise<PlaylistDetail> {
+  const platformPlaylistId = parseProviderScopedId(playlistId);
+  const providerScopedPlaylistId = createProviderScopedId(platformPlaylistId);
+  const cacheKey = CACHE_KEYS.playlistDetail('qq', providerScopedPlaylistId);
+  if (options.forceRefresh) {
+    cache.delete(cacheKey);
+  }
+
+  return cache.getOrSet(cacheKey, CACHE_TTL_MS.playlistDetail, async () => {
+    const sessionIdentity = await getQQSessionIdentity(runtime, QQ_PLAYLIST_DETAIL_URL);
+    const userId = sessionIdentity.loggedIn && sessionIdentity.userId ? sessionIdentity.userId : '0';
+    const response = await runtime.requestJson<QQPlaylistDetailResponse>({
+      partition: QQ_LOGIN_PARTITION,
+      url: createPlaylistDetailUrl(platformPlaylistId, userId)
+    });
+    if (response.code !== 0 || response.req_0?.code !== 0) {
+      throw new Error('QQ 音乐歌单详情请求失败');
+    }
+
+    const detail = response.req_0?.data;
+    const legacyDetail = response.cdlist?.[0];
+    const playlistTitle = firstText(
+      detail?.dirinfo?.title,
+      detail?.dirinfo?.dissname,
+      legacyDetail?.dissname,
+      legacyDetail?.diss_name,
+      legacyDetail?.name
+    ) || 'QQ 音乐歌单';
+    const coverUrl = normalizeImageUrl(firstText(
+      detail?.dirinfo?.cover,
+      detail?.dirinfo?.pic,
+      legacyDetail?.diss_cover,
+      legacyDetail?.cover,
+      legacyDetail?.pic
+    ));
+    const creatorName = firstText(
+      detail?.dirinfo?.creator?.nick,
+      detail?.dirinfo?.creator?.nickname,
+      legacyDetail?.creator?.nick,
+      legacyDetail?.creator?.nickname
+    );
+    const description = firstText(
+      detail?.dirinfo?.desc,
+      legacyDetail?.diss_desc,
+      legacyDetail?.desc
+    ) ?? '';
+    const listenNum = normalizeNonNegativeNumber(
+      detail?.dirinfo?.listen_num ?? detail?.dirinfo?.songnum ?? legacyDetail?.listen_num ?? legacyDetail?.song_cnt
+    );
+
+    const songs = (detail?.songlist ?? legacyDetail?.songlist ?? [])
+      .map((track) => mapTrack(track, providerScopedPlaylistId, playlistTitle))
+      .filter((song): song is Song => Boolean(song));
+
+    const detailPlaylist: Playlist = {
+      id: providerScopedPlaylistId,
+      providerId: 'qq',
+      title: playlistTitle,
+      description,
+      songIds: [],
+      coverTone: QQ_COVER_TONE,
+      ...(coverUrl ? { coverUrl } : {}),
+      sourceLabel: QQ_SOURCE_LABEL
+    };
+
+    return {
+      providerId: 'qq',
+      playlist: detailPlaylist,
+      tracks: songs,
+      ...(creatorName ? { creatorName } : {}),
+      ...(listenNum !== undefined ? { playCount: listenNum } : {})
+    };
+  });
 }
 
 function createQQSongDetailUrl(songMid: string, songType = 0): string {
@@ -2759,7 +3517,7 @@ function mapPlaylist(playlist: QQPlaylistItem): Playlist | null {
     ?? 0
   ) || 0;
   const isLiked = isOfficialLikedDirectory(playlist);
-  const coverUrl = normalizeImageUrl(firstText(
+  const coverUrl = isLiked ? undefined : normalizeImageUrl(firstText(
     playlist.diss_cover,
     playlist.logo,
     playlist.picurl,
@@ -3196,6 +3954,17 @@ interface QQAlbumDetailResponse {
   };
 }
 
+interface QQArtistSongsResponse {
+  code?: number;
+  singer_songs?: {
+    code?: number;
+    data?: {
+      totalNum?: number;
+      songList?: QQPlaylistTrack[];
+    };
+  };
+}
+
 interface QQSingerDetail {
   basic_info?: {
     singer_mid?: string;
@@ -3408,6 +4177,16 @@ interface QQPlaylistDetailResponse {
     data?: {
       dirinfo?: {
         title?: string;
+        dissname?: string;
+        desc?: string;
+        cover?: string;
+        pic?: string;
+        listen_num?: number;
+        songnum?: number;
+        creator?: {
+          nick?: string;
+          nickname?: string;
+        };
       };
       songlist?: QQPlaylistTrack[];
     };
@@ -3415,7 +4194,19 @@ interface QQPlaylistDetailResponse {
   cdlist?: Array<{
     dissname?: string;
     diss_name?: string;
+    diss_desc?: string;
     name?: string;
+    desc?: string;
+    cover?: string;
+    diss_cover?: string;
+    pic?: string;
+    listen_num?: number;
+    songnum?: number;
+    song_cnt?: number;
+    creator?: {
+      nick?: string;
+      nickname?: string;
+    };
     songlist?: QQPlaylistTrack[];
   }>;
 }

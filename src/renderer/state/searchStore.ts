@@ -1,282 +1,256 @@
 import { create } from 'zustand';
-import type { ProviderId, RemoteProviderId, Song } from '../../shared/musicTypes';
-import type { SearchEntityResults, SearchEntityType } from '../../shared/providerTypes';
+import type { ProviderId, Song } from '../../shared/musicTypes';
+import type { SearchEntityResults } from '../../shared/providerTypes';
+import { REMOTE_PROVIDER_IDS } from './providerSessionStore';
 
-export type SearchResultView = 'overview' | SearchEntityType;
+export type SearchResultView = 'overview' | 'song' | 'artist' | 'album' | 'playlist';
 
-interface SearchState {
+export interface SearchState {
   keyword: string;
-  providerId: ProviderId | null;
-  results: Song[];
+  providerId: ProviderId;
+  songs: Song[];
   entityResults: SearchEntityResults | null;
   activeResultView: SearchResultView;
   isLoading: boolean;
   isLoadingMore: boolean;
   errorMessage: string | null;
-  search: (providerId: ProviderId, keyword: string) => Promise<Song[]>;
-  setActiveResultView: (view: SearchResultView) => void;
-  loadMore: (entityType: SearchEntityType) => Promise<void>;
-  clearSearch: () => void;
-  resetForTest: () => void;
+  entityErrorMessage: string | null;
+  currentPage: number;
+  hasMoreSongs: boolean;
+
+  search(providerId: ProviderId, keyword: string): Promise<void>;
+  setActiveResultView(view: SearchResultView): void;
+  loadMore(): Promise<void>;
+  clearSearch(): void;
 }
 
-const SEARCH_RESULT_LIMIT = 30;
-
-const initialState = {
-  keyword: '',
-  providerId: null,
-  results: [] as Song[],
-  entityResults: null as SearchEntityResults | null,
-  activeResultView: 'overview' as SearchResultView,
-  isLoading: false,
-  isLoadingMore: false,
-  errorMessage: null
-};
-
-let requestRevision = 0;
-
-const sectionKeyByEntityType = {
-  song: 'songs',
-  artist: 'artists',
-  album: 'albums',
-  playlist: 'playlists'
-} as const;
+const PAGE_SIZE = 30;
+let searchRevision = 0;
+let loadMoreRevision = 0;
 
 export const useSearchStore = create<SearchState>((set, get) => ({
-  ...initialState,
+  keyword: '',
+  providerId: 'netease',
+  songs: [],
+  entityResults: null,
+  activeResultView: 'overview',
+  isLoading: false,
+  isLoadingMore: false,
+  errorMessage: null,
+  entityErrorMessage: null,
+  currentPage: 0,
+  hasMoreSongs: false,
 
-  search: async (providerId, keyword) => {
-    const normalizedKeyword = keyword.trim();
-    const requestId = ++requestRevision;
-    if (!normalizedKeyword) {
-      set({ ...initialState });
-      return [];
+  async search(providerId, keyword) {
+    const trimmed = keyword.trim();
+    if (!trimmed) {
+      get().clearSearch();
+      return;
     }
 
+    const revision = ++searchRevision;
+    loadMoreRevision++;
     set({
-      keyword: normalizedKeyword,
+      keyword: trimmed,
       providerId,
-      results: [],
+      songs: [],
       entityResults: null,
       activeResultView: 'overview',
       isLoading: true,
       isLoadingMore: false,
-      errorMessage: null
+      errorMessage: null,
+      entityErrorMessage: null,
+      currentPage: 0,
+      hasMoreSongs: false
     });
 
-    if (providerId === 'local') {
-      return loadSongOnlySearch(providerId, normalizedKeyword, requestId, set);
-    }
+    const songsPromise = window.musicPlayer.music.search(providerId, trimmed, { limit: PAGE_SIZE, offset: 0 });
+    const entitiesPromise = isRemoteProviderId(providerId)
+      ? window.musicPlayer.music.searchEntities(providerId, trimmed, { limit: PAGE_SIZE, offset: 0 })
+      : Promise.resolve(null);
+    const [songsSettled, entitiesSettled] = await Promise.allSettled([songsPromise, entitiesPromise]);
 
-    try {
-      const result = await window.musicPlayer.music.searchEntities(providerId, normalizedKeyword, {
-        limit: SEARCH_RESULT_LIMIT,
-        offset: 0
-      });
-      if (requestId !== requestRevision) {
-        return get().results;
-      }
-
-      if (!result.ok) {
-        set({
-          keyword: normalizedKeyword,
-          providerId,
-          results: [],
-          entityResults: null,
-          isLoading: false,
-          errorMessage: result.error.message
-        });
-        return [];
-      }
-
-      set({
-        keyword: normalizedKeyword,
-        providerId,
-        results: result.data.sections.songs.items,
-        entityResults: result.data,
-        isLoading: false,
-        isLoadingMore: false,
-        errorMessage: null
-      });
-      return result.data.sections.songs.items;
-    } catch (error) {
-      if (requestId === requestRevision) {
-        set({
-          keyword: normalizedKeyword,
-          providerId,
-          results: [],
-          entityResults: null,
-          isLoading: false,
-          isLoadingMore: false,
-          errorMessage: getSearchRequestErrorMessage(error)
-        });
-      }
-      return [];
-    }
-  },
-
-  setActiveResultView: (activeResultView) => set({ activeResultView }),
-
-  loadMore: async (entityType) => {
     const state = get();
-    if (
-      state.providerId !== 'qq'
-      && state.providerId !== 'netease'
-      || !state.entityResults
-      || state.isLoadingMore
-      || state.isLoading
-    ) {
-      return;
-    }
+    if (revision !== searchRevision || state.keyword !== trimmed || state.providerId !== providerId) return;
 
-    const sectionKey = sectionKeyByEntityType[entityType];
-    const currentSection = state.entityResults.sections[sectionKey];
-    if (!currentSection.available || !currentSection.hasMore) {
-      return;
-    }
+    const songsResult = songsSettled.status === 'fulfilled' ? songsSettled.value : null;
+    const entitiesResult = entitiesSettled.status === 'fulfilled' ? entitiesSettled.value : null;
+    const primarySongs = songsResult?.ok ? songsResult.data : [];
+    const entitySongs = entitiesResult?.ok && entitiesResult.data.sections.songs.available
+      ? entitiesResult.data.sections.songs.items
+      : [];
+    const songs = mergeSongs(primarySongs, entitySongs);
 
-    const requestId = requestRevision;
+    const songsError = songsSettled.status === 'rejected'
+      ? errorMessageFrom(songsSettled.reason)
+      : songsResult && !songsResult.ok
+        ? songsResult.error.message
+        : null;
+    const entitiesError = entitiesSettled.status === 'rejected'
+      ? errorMessageFrom(entitiesSettled.reason)
+      : entitiesResult && !entitiesResult.ok
+        ? entitiesResult.error.message
+        : null;
+    const anyRequestSucceeded = Boolean(songsResult?.ok || entitiesResult?.ok);
+
+    set({
+      songs,
+      entityResults: entitiesResult?.ok ? entitiesResult.data : null,
+      isLoading: false,
+      errorMessage: anyRequestSucceeded ? null : songsError ?? entitiesError ?? '搜索请求失败',
+      entityErrorMessage: entitiesError,
+      currentPage: 1,
+      hasMoreSongs: Boolean(songsResult?.ok && songsResult.data.length === PAGE_SIZE)
+    });
+  },
+
+  setActiveResultView(view) {
+    set({ activeResultView: view });
+  },
+
+  async loadMore() {
+    const state = get();
+    const { providerId, keyword, currentPage, isLoadingMore, entityResults, hasMoreSongs } = state;
+    if (isLoadingMore || !keyword || currentPage < 1) return;
+
+    const canLoadEntities = isRemoteProviderId(providerId) && Boolean(
+      entityResults && Object.values(entityResults.sections).some((section) => section.available && section.hasMore)
+    );
+    if (!hasMoreSongs && !canLoadEntities) return;
+
+    const revision = searchRevision;
+    const requestRevision = ++loadMoreRevision;
+    const offset = currentPage * PAGE_SIZE;
     set({ isLoadingMore: true });
-    try {
-      const result = await window.musicPlayer.music.searchEntities(state.providerId, state.keyword, {
-        entityTypes: [entityType],
-        limit: SEARCH_RESULT_LIMIT,
-        offset: currentSection.items.length
-      });
 
-      if (requestId !== requestRevision || get().providerId !== state.providerId || get().keyword !== state.keyword) {
-        return;
-      }
+    const songsPromise = hasMoreSongs
+      ? window.musicPlayer.music.search(providerId, keyword, { limit: PAGE_SIZE, offset })
+      : Promise.resolve(null);
+    const entitiesPromise = canLoadEntities && isRemoteProviderId(providerId)
+      ? window.musicPlayer.music.searchEntities(providerId, keyword, { limit: PAGE_SIZE, offset })
+      : Promise.resolve(null);
+    const [songsSettled, entitiesSettled] = await Promise.allSettled([songsPromise, entitiesPromise]);
 
-      if (!result.ok) {
-        setSearchLoadMoreError(set, sectionKey, result.error.message);
-        return;
-      }
-
-      const nextSection = result.data.sections[sectionKey];
-      set((current) => {
-        if (!current.entityResults) {
-          return { isLoadingMore: false };
-        }
-
-        const sections = {
-          ...current.entityResults.sections,
-          [sectionKey]: {
-            ...nextSection,
-            items: [...current.entityResults.sections[sectionKey].items, ...nextSection.items]
-          }
-        } as SearchEntityResults['sections'];
-        const entityResults = {
-          ...current.entityResults,
-          sections
-        };
-
-        return {
-          entityResults,
-          results: entityResults.sections.songs.items,
-          isLoadingMore: false
-        };
-      });
-    } catch (error) {
-      if (requestId === requestRevision && get().providerId === state.providerId && get().keyword === state.keyword) {
-        setSearchLoadMoreError(set, sectionKey, getSearchRequestErrorMessage(error));
-      }
+    const latest = get();
+    if (
+      revision !== searchRevision ||
+      requestRevision !== loadMoreRevision ||
+      latest.keyword !== keyword ||
+      latest.providerId !== providerId
+    ) {
+      if (requestRevision === loadMoreRevision) set({ isLoadingMore: false });
+      return;
     }
+
+    const songsResult = songsSettled.status === 'fulfilled' ? songsSettled.value : null;
+    const entitiesResult = entitiesSettled.status === 'fulfilled' ? entitiesSettled.value : null;
+    let songs = latest.songs;
+    if (songsResult?.ok) songs = mergeSongs(songs, songsResult.data);
+    if (entitiesResult?.ok && entitiesResult.data.sections.songs.available) {
+      songs = mergeSongs(songs, entitiesResult.data.sections.songs.items);
+    }
+
+    const entityErrorMessage = entitiesSettled.status === 'rejected'
+      ? errorMessageFrom(entitiesSettled.reason)
+      : entitiesResult && !entitiesResult.ok
+        ? entitiesResult.error.message
+        : entitiesResult?.ok
+          ? null
+          : latest.entityErrorMessage;
+    const songsAttemptSucceeded = !hasMoreSongs || Boolean(songsResult?.ok);
+    const entitiesAttemptSucceeded = !canLoadEntities || Boolean(entitiesResult?.ok);
+
+    set({
+      songs,
+      entityResults: entitiesResult?.ok
+        ? mergeEntityResults(latest.entityResults, entitiesResult.data)
+        : latest.entityResults,
+      isLoadingMore: false,
+      entityErrorMessage,
+      hasMoreSongs: songsResult?.ok ? songsResult.data.length === PAGE_SIZE : latest.hasMoreSongs,
+      currentPage: songsAttemptSucceeded && entitiesAttemptSucceeded ? currentPage + 1 : currentPage
+    });
   },
 
-  clearSearch: () => {
-    requestRevision += 1;
-    set(initialState);
-  },
-  resetForTest: () => {
-    requestRevision += 1;
-    set(initialState);
+  clearSearch() {
+    searchRevision++;
+    loadMoreRevision++;
+    set({
+      keyword: '',
+      songs: [],
+      entityResults: null,
+      activeResultView: 'overview',
+      isLoading: false,
+      isLoadingMore: false,
+      errorMessage: null,
+      entityErrorMessage: null,
+      currentPage: 0,
+      hasMoreSongs: false
+    });
   }
 }));
 
-async function loadSongOnlySearch(
-  providerId: ProviderId,
-  keyword: string,
-  requestId: number,
-  set: (partial: Partial<SearchState>) => void
-): Promise<Song[]> {
-  try {
-    const result = await window.musicPlayer.music.search(providerId, keyword, {
-      limit: SEARCH_RESULT_LIMIT,
-      offset: 0
-    });
-    if (requestId !== requestRevision) {
-      return [];
+function mergeSongs(current: Song[], next: Song[]): Song[] {
+  const songs = [...current];
+  const seen = new Set(current.map((song) => `${song.providerId}:${song.id}`));
+  for (const song of next) {
+    const key = `${song.providerId}:${song.id}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      songs.push(song);
     }
-
-    if (!result.ok) {
-      set({
-        keyword,
-        providerId,
-        results: [],
-        entityResults: null,
-        isLoading: false,
-        errorMessage: result.error.message
-      });
-      return [];
-    }
-
-    set({
-      keyword,
-      providerId,
-      results: result.data,
-      entityResults: null,
-      isLoading: false,
-      errorMessage: null
-    });
-    return result.data;
-  } catch (error) {
-    if (requestId === requestRevision) {
-      set({
-        keyword,
-        providerId,
-        results: [],
-        entityResults: null,
-        isLoading: false,
-        errorMessage: getSearchRequestErrorMessage(error)
-      });
-    }
-    return [];
   }
+  return songs;
 }
 
-function setSearchLoadMoreError(
-  set: (partial: Partial<SearchState> | ((state: SearchState) => Partial<SearchState>)) => void,
-  sectionKey: keyof SearchEntityResults['sections'],
-  errorMessage: string
-): void {
-  set((current) => {
-    if (!current.entityResults) {
-      return { isLoadingMore: false };
+function mergeEntityResults(current: SearchEntityResults | null, next: SearchEntityResults): SearchEntityResults {
+  if (!current || current.providerId !== next.providerId || current.keyword !== next.keyword) return next;
+  return {
+    providerId: next.providerId,
+    keyword: next.keyword,
+    sections: {
+      songs: mergeSection(current.sections.songs, next.sections.songs),
+      artists: mergeSection(current.sections.artists, next.sections.artists),
+      albums: mergeSection(current.sections.albums, next.sections.albums),
+      playlists: mergeSection(current.sections.playlists, next.sections.playlists)
     }
-
-    return {
-      entityResults: {
-        ...current.entityResults,
-        sections: {
-          ...current.entityResults.sections,
-          [sectionKey]: {
-            ...current.entityResults.sections[sectionKey],
-            errorMessage
-          }
-        } as SearchEntityResults['sections']
-      },
-      isLoadingMore: false
-    };
-  });
+  };
 }
 
-function getSearchRequestErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message.trim()
-    ? error.message
-    : '搜索服务暂时不可用，请稍后重试';
+function mergeSection<T>(
+  current: { items: T[]; hasMore: boolean; available: boolean; total: number; errorMessage: string | null },
+  next: { items: T[]; hasMore: boolean; available: boolean; total: number; errorMessage: string | null }
+): { items: T[]; hasMore: boolean; available: boolean; total: number; errorMessage: string | null } {
+  const items = [...current.items];
+  const seen = new Set(current.items.map(entityIdentity));
+  for (const item of next.items) {
+    const key = entityIdentity(item);
+    if (!seen.has(key)) {
+      seen.add(key);
+      items.push(item);
+    }
+  }
+  return {
+    items,
+    hasMore: next.hasMore,
+    available: next.available,
+    total: next.total || current.total || items.length,
+    errorMessage: next.errorMessage
+  };
 }
 
-export function isRemoteSearchProvider(providerId: ProviderId | null): providerId is RemoteProviderId {
-  return providerId === 'qq' || providerId === 'netease';
+function entityIdentity(item: unknown): string {
+  if (item && typeof item === 'object' && 'id' in item) {
+    const value = item as { id: unknown; providerId?: unknown };
+    return `${String(value.providerId ?? '')}:${String(value.id)}`;
+  }
+  return JSON.stringify(item);
+}
+
+function errorMessageFrom(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function isRemoteProviderId(providerId: ProviderId): providerId is 'netease' | 'qq' {
+  return REMOTE_PROVIDER_IDS.includes(providerId as 'netease' | 'qq');
 }

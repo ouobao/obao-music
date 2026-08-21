@@ -125,6 +125,20 @@ export function createLocalProvider(store?: LocalLibraryStore, options: LocalPro
       return getLibrarySongs();
     },
 
+    async getPlaylistDetail(playlistId) {
+      if (playlistId !== LOCAL_LIBRARY_PLAYLIST_ID) {
+        throw new Error('本地音乐歌单不存在');
+      }
+
+      const songs = getLibrarySongs();
+      return {
+        providerId: 'local',
+        playlist: createLibraryPlaylist(songs),
+        tracks: songs,
+        trackCount: songs.length
+      };
+    },
+
     async getSongUrl(song, quality) {
       const filePath = filePathsBySongId.get(song.id);
       if (!filePath || !existsSync(filePath)) {

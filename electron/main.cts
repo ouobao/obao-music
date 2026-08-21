@@ -43,6 +43,10 @@ let rendererThemePreference: 'system' | 'light' | 'dark' = 'system';
 let rendererDiagnosticWindowStartedAt = 0;
 let rendererDiagnosticEventCount = 0;
 let rendererDiagnosticRateLimitLogged = false;
+// 渲染进程崩溃自恢复：记录崩溃时间窗，避免无限重启循环
+const RENDERER_CRASH_RECOVERY_WINDOW_MS = 60_000;
+const RENDERER_CRASH_RECOVERY_MAX = 3;
+let rendererCrashRecovery = { count: 0, windowStart: 0 };
 type TrayPlaybackAction = 'previous' | 'toggle' | 'next';
 type RendererDiagnosticLevel = 'debug' | 'info' | 'warn' | 'error';
 interface TrayPlaybackState {
@@ -163,6 +167,8 @@ function registerProcessDiagnostics(): void {
     diagnostics.log('render-process-gone', processGoneDetails);
     if (isMainWindowContents(contents)) {
       invalidateRendererReadyMarker('render-process-gone', processGoneDetails);
+      // 渲染进程崩溃后自动恢复：重新加载窗口，避免“必须重启软件”的体验
+      recoverCrashedRenderer(contents, details);
     }
   });
   app.on('child-process-gone', (_event, details) => {
@@ -222,10 +228,46 @@ function registerWebContentsDiagnostics(contents: electron.WebContents): void {
   });
   contents.on('unresponsive', () => {
     diagnostics.log('renderer-unresponsive', getWebContentsDiagnosticDetails(contents));
+    scheduleHangRecovery(contents);
   });
   contents.on('responsive', () => {
     diagnostics.log('renderer-responsive', getWebContentsDiagnosticDetails(contents));
+    cancelHangRecovery(contents);
   });
+}
+
+// 渲染进程挂起自恢复：无响应数秒后强制终止渲染进程，由 render-process-gone 处理器自动重载窗口
+const RENDERER_HANG_RECOVERY_DELAY_MS = 5000;
+const hangRecoveryTimers = new Map<number, NodeJS.Timeout>();
+
+function scheduleHangRecovery(contents: electron.WebContents): void {
+  if (!isMainWindowContents(contents) || hangRecoveryTimers.has(contents.id)) {
+    return;
+  }
+  const timer = setTimeout(() => {
+    hangRecoveryTimers.delete(contents.id);
+    if (contents.isDestroyed() || contents.isCrashed()) {
+      return;
+    }
+    diagnostics.log('renderer-hang-recovery', {
+      webContentsId: contents.id,
+      delayMs: RENDERER_HANG_RECOVERY_DELAY_MS
+    });
+    try {
+      contents.forcefullyCrashRenderer();
+    } catch (error) {
+      diagnostics.logError('renderer-hang-recovery-failed', error);
+    }
+  }, RENDERER_HANG_RECOVERY_DELAY_MS);
+  hangRecoveryTimers.set(contents.id, timer);
+}
+
+function cancelHangRecovery(contents: electron.WebContents): void {
+  const timer = hangRecoveryTimers.get(contents.id);
+  if (timer) {
+    clearTimeout(timer);
+    hangRecoveryTimers.delete(contents.id);
+  }
 }
 
 function isMainWindowContents(contents: electron.WebContents): boolean {
@@ -238,6 +280,50 @@ function isMainWindowContents(contents: electron.WebContents): boolean {
   } catch {
     return false;
   }
+}
+
+function recoverCrashedRenderer(
+  contents: electron.WebContents,
+  details: Electron.RenderProcessGoneDetails
+): void {
+  if (isQuitting || contents.isDestroyed() || !mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  // 非崩溃性质的退出（正常关闭/手动结束）不自动恢复
+  if (details.reason === 'clean-exit' || details.reason === 'killed') {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - rendererCrashRecovery.windowStart > RENDERER_CRASH_RECOVERY_WINDOW_MS) {
+    rendererCrashRecovery = { count: 0, windowStart: now };
+  }
+  if (rendererCrashRecovery.count >= RENDERER_CRASH_RECOVERY_MAX) {
+    diagnostics.log('renderer-crash-recovery-skipped', {
+      reason: 'too-many-reloads',
+      windowMs: RENDERER_CRASH_RECOVERY_WINDOW_MS,
+      maxReloads: RENDERER_CRASH_RECOVERY_MAX
+    });
+    return;
+  }
+  rendererCrashRecovery.count += 1;
+  diagnostics.log('renderer-crash-recovery', {
+    reason: details.reason,
+    reloadCount: rendererCrashRecovery.count
+  });
+
+  // 稍等片刻让崩溃进程完全退出后再重载，避免同帧内竞态
+  setTimeout(() => {
+    try {
+      if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+        return;
+      }
+      mainWindow.webContents.reload();
+    } catch (error) {
+      diagnostics.logError('renderer-crash-recovery-failed', error);
+    }
+  }, 600);
 }
 
 function invalidateRendererReadyMarker(reason: string, details: Record<string, unknown> = {}): void {
@@ -802,6 +888,36 @@ function registerMusicProviderHandlers(providerRegistry: ProviderRegistry, audio
     providerRegistry.run(providerId, (provider) => provider.login())
   );
 
+  ipcMain.handle('music:login-qr-create', (_event, providerId) =>
+    providerRegistry.run(providerId, async (provider) => {
+      if (!provider.createLoginQr) {
+        throw new Error('该平台暂不支持扫码登录');
+      }
+
+      return provider.createLoginQr();
+    })
+  );
+
+  ipcMain.handle('music:login-qr-poll', (_event, providerId, key) =>
+    providerRegistry.run(providerId, async (provider) => {
+      if (!provider.pollLoginQr) {
+        throw new Error('该平台暂不支持扫码登录');
+      }
+
+      return provider.pollLoginQr(key);
+    })
+  );
+
+  ipcMain.handle('music:login-qr-cancel', (_event, providerId, key) =>
+    providerRegistry.run(providerId, async (provider) => {
+      if (!provider.cancelLoginQr) {
+        return;
+      }
+
+      return provider.cancelLoginQr(key);
+    })
+  );
+
   ipcMain.handle('music:logout', (_event, providerId) =>
     providerRegistry.run(providerId, (provider) => provider.logout())
   );
@@ -834,6 +950,15 @@ function registerMusicProviderHandlers(providerRegistry: ProviderRegistry, audio
     providerRegistry.run(providerId, (provider) => provider.getPlaylistTracks(playlistId, options))
   );
 
+  ipcMain.handle('music:get-playlist-detail', (_event, providerId, playlistId, options) =>
+    providerRegistry.run(providerId, (provider) => {
+      if (!provider.getPlaylistDetail) {
+        throw new Error('当前音乐来源不支持歌单详情');
+      }
+      return provider.getPlaylistDetail(playlistId, options);
+    })
+  );
+
   ipcMain.handle('music:get-charts', (_event, providerId, options) =>
     providerRegistry.runCapability(providerId, 'charts', (capability) => capability.getCharts(options))
   );
@@ -857,6 +982,12 @@ function registerMusicProviderHandlers(providerRegistry: ProviderRegistry, audio
   ipcMain.handle('music:get-artist-detail', (_event, providerId, artistId, options) =>
     providerRegistry.runCapability(providerId, 'artistCatalog', (capability) =>
       capability.getArtistDetail(artistId, options)
+    )
+  );
+
+  ipcMain.handle('music:get-artist-songs-page', (_event, providerId, artistId, offset, options) =>
+    providerRegistry.runCapability(providerId, 'artistCatalog', (capability) =>
+      capability.getArtistSongsPage(artistId, offset, options)
     )
   );
 
@@ -1038,15 +1169,28 @@ function registerAudioSourceProtocol(audioSourceRegistry: AudioSourceRegistry) {
   });
 }
 
+const AUDIO_FETCH_HEADER_TIMEOUT_MS = 20_000;
+
 async function createRemoteAudioResponse(source: RegisteredAudioSource, request: Request): Promise<Response> {
   const sourceSession = getAudioSourceSession(source.providerId);
   const range = request.headers.get('range');
-  const response = await sourceSession.fetch(source.url, {
-    credentials: 'include',
-    referrer: getAudioRequestReferer(source.providerId),
-    headers: createAudioRequestHeaders(source.providerId, request),
-    redirect: 'follow'
-  });
+  // 响应头超时保护：CDN 会话在网络挂起（例如频繁切歌打断大量流式响应）时可能
+  // 永远不返回，导致 <audio> 卡在加载中、canplay 永不触发而“彻底无法播放”。
+  // 只在“等待响应头”阶段超时；拿到响应头后立刻取消超时，流式播放不受影响。
+  const controller = new AbortController();
+  const headerTimeoutId = setTimeout(() => controller.abort(), AUDIO_FETCH_HEADER_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await sourceSession.fetch(source.url, {
+      credentials: 'include',
+      referrer: getAudioRequestReferer(source.providerId),
+      headers: createAudioRequestHeaders(source.providerId, request),
+      redirect: 'follow',
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(headerTimeoutId);
+  }
 
   if (!response.ok && response.status !== 206) {
     return new Response('Audio source unavailable', { status: response.status || 502 });
@@ -1076,6 +1220,8 @@ function normalizeAudioResponseHeaders(headers: Headers, sourceUrl: string): Hea
   if (!contentType || contentType === 'application/octet-stream' || contentType === 'binary/octet-stream') {
     normalizedHeaders.set('Content-Type', getAudioContentTypeFromUrl(sourceUrl));
   }
+
+  normalizedHeaders.set('Access-Control-Allow-Origin', '*');
 
   return normalizedHeaders;
 }
@@ -1125,7 +1271,8 @@ async function createFileAudioResponse(fileUrl: string, rangeHeader: string | nu
   const headers = new Headers({
     'Accept-Ranges': 'bytes',
     'Content-Type': getAudioContentType(filePath),
-    'Content-Length': String(range ? range.end - range.start + 1 : fileStat.size)
+    'Content-Length': String(range ? range.end - range.start + 1 : fileStat.size),
+    'Access-Control-Allow-Origin': '*'
   });
 
   if (range) {

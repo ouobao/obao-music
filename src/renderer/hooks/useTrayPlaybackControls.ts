@@ -1,46 +1,36 @@
 import { useEffect } from 'react';
-import type { TrayPlaybackAction } from '../../shared/global';
 import { usePlayerStore } from '../state/playerStore';
 
 export function useTrayPlaybackControls() {
-  const currentMedia = usePlayerStore((state) => state.currentMedia);
-  const currentSong = usePlayerStore((state) => state.currentSong);
-  const currentPlayableMedia = currentMedia ?? currentSong;
-  const isPlaying = usePlayerStore((state) => state.isPlaying);
-
   useEffect(() => {
-    const trayApi = window.musicPlayer?.tray;
-    if (!trayApi) {
-      return undefined;
-    }
+    const tray = window.musicPlayer.tray;
+    if (!tray) return;
 
-    return trayApi.onPlaybackAction(handleTrayPlaybackAction);
-  }, []);
-
-  useEffect(() => {
-    window.musicPlayer?.tray?.updatePlaybackState({
-      title: currentPlayableMedia?.title ?? '',
-      artist: currentPlayableMedia?.mediaType === 'program'
-        ? currentPlayableMedia.podcast.author
-        : currentPlayableMedia?.artist ?? '',
-      hasSong: Boolean(currentPlayableMedia),
-      isPlaying: Boolean(currentPlayableMedia && isPlaying)
+    const unsubscribe = tray.onPlaybackAction((action) => {
+      const player = usePlayerStore.getState();
+      if (action === 'previous') player.playPrevious();
+      else if (action === 'next') player.playNext();
+      else if (action === 'toggle') player.togglePlaying();
     });
-  }, [currentPlayableMedia, isPlaying]);
-}
 
-function handleTrayPlaybackAction(action: TrayPlaybackAction) {
-  const player = usePlayerStore.getState();
+    const pushState = (state: { currentSong: { title: string; artist: string } | null; isPlaying: boolean }) => {
+      tray.updatePlaybackState({
+        title: state.currentSong?.title ?? '',
+        artist: state.currentSong?.artist ?? '',
+        hasSong: Boolean(state.currentSong),
+        isPlaying: state.isPlaying
+      });
+    };
 
-  switch (action) {
-    case 'previous':
-      player.playPrevious();
-      break;
-    case 'toggle':
-      player.togglePlaying();
-      break;
-    case 'next':
-      player.playNext();
-      break;
-  }
+    const unsubscribeStore = usePlayerStore.subscribe((state) => {
+      pushState(state);
+    });
+
+    pushState(usePlayerStore.getState());
+
+    return () => {
+      unsubscribe();
+      unsubscribeStore();
+    };
+  }, []);
 }
