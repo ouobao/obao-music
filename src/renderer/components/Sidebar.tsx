@@ -5,7 +5,7 @@ import { useProviderSessionStore } from '../state/providerSessionStore';
 import type { Playlist, ProviderId } from '../../shared/musicTypes';
 import { formatPlaylistTitle } from '../utils/providerDisplay';
 import { onImageReveal, imageRevealRef } from '../utils/imageReveal';
-import { NavChartsIcon, NavDiscoverIcon, NavHistoryIcon, NavPlaylistIcon } from './icons';
+import { NavChartsIcon, NavDiscoverIcon, NavHistoryIcon, NavPlaylistIcon, PanelCollapseIcon, PanelExpandIcon } from './icons';
 import { SkeletonBlock } from './Skeleton';
 import logoUrl from '../../../assets/branding/logo5.png';
 
@@ -16,7 +16,7 @@ const NAV_ITEMS: { view: 'home' | 'charts' | 'playlistDiscovery' | 'listeningHis
   { view: 'listeningHistory', label: '最近播放', icon: <NavHistoryIcon size={17} strokeWidth={1.8} /> }
 ];
 
-export function Sidebar() {
+export function Sidebar({ collapsed = false, onToggleCollapsed }: { collapsed?: boolean; onToggleCollapsed?: () => void }) {
   const currentView = useUiStore((s) => s.currentView.name);
   const navigateToView = useUiStore((s) => s.navigateToView);
   const activeProviderId = useProviderSessionStore((s) => s.activeProviderId);
@@ -49,6 +49,18 @@ export function Sidebar() {
           <img className="logo-badge" src={logoUrl} alt="欧包音乐" draggable={false} />
           <span className="sidebar-brand-text">欧包音乐</span>
         </div>
+        {onToggleCollapsed && (
+          <button
+            className="sidebar-toggle-btn"
+            type="button"
+            title={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+            aria-expanded={!collapsed}
+            onClick={onToggleCollapsed}
+          >
+            {collapsed ? <PanelExpandIcon size={15} strokeWidth={2} /> : <PanelCollapseIcon size={15} strokeWidth={2} />}
+          </button>
+        )}
       </div>
 
       <div>

@@ -32,6 +32,59 @@
   }
 }
 
+/* 折叠侧边栏：左列收窄，文本类元素淡出隐藏，只留图标导航 */
+.app-layout {
+  transition: grid-template-columns var(--duration-page) var(--ease-desktop-out);
+}
+
+.app-layout.sidebar-collapsed {
+  grid-template-columns: 64px 1fr;
+}
+
+@media (max-width: 1100px) {
+  .app-layout.sidebar-collapsed {
+    grid-template-columns: 60px 1fr;
+  }
+}
+
+.app-layout.sidebar-collapsed .sidebar-brand-text,
+.app-layout.sidebar-collapsed .nav-item-label,
+.app-layout.sidebar-collapsed .nav-group-title,
+.app-layout.sidebar-collapsed .sidebar-playlist-section,
+.app-layout.sidebar-collapsed .playlist-nav-title {
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* 折叠时品牌区收缩为居中徽标，汉堡按钮保持可点以便展开 */
+.app-layout.sidebar-collapsed .brand-logo {
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.app-layout.sidebar-collapsed .sidebar-header {
+  padding-inline: 4px;
+}
+
+.app-layout.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding: 0;
+}
+
+.app-layout.sidebar-collapsed .nav-item-icon {
+  margin-right: 0;
+}
+
+.app-layout.sidebar-collapsed .playlist-nav-item {
+  justify-content: center;
+  gap: 0;
+  padding: 6px 0;
+}
+
 /* 侧边栏 (Sidebar) */
 .sidebar {
   grid-area: sidebar;
@@ -74,6 +127,24 @@
 .sidebar-header button,
 .sidebar-header [role='button'] {
   -webkit-app-region: no-drag;
+}
+
+/* 侧边栏折叠按钮（汉堡菜单） */
+.sidebar-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  transition: background var(--duration-micro), color var(--duration-micro);
+  flex-shrink: 0;
+}
+
+.sidebar-toggle-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
 }
 
 .brand-logo {

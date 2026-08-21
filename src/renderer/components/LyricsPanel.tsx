@@ -2866,7 +2866,8 @@ function playReducedMotionExit(
 
 /**
  * 新版歌词页转场：简单的整页推拉。
- * 面板从底部推入，内容随进度淡入上浮；不使用封面飞行卡、光晕与轨道层。
+ * 面板连同全部内容从底部推入 / 推出，内容本身不做二次动画，
+ * 避免封面等元素在过渡中出现先隐藏再浮现的跳变。
  */
 function playSimpleSlideEntry(
   timeline: gsap.core.Timeline,
@@ -2876,35 +2877,13 @@ function playSimpleSlideEntry(
   const duration = getLyricsTransitionDuration('enter', false) / 1000;
 
   timeline
-    .set([
-      elements.stage,
-      elements.coverEnter,
-      elements.titleEnter,
-      elements.textEnter,
-      elements.linesEnter,
-      elements.toolbar,
-      elements.sideTools
-    ], { autoAlpha: 0 }, 0)
     .set(elements.panel, { autoAlpha: 1, yPercent: 100 }, 0)
     .call(callbacks.onHandoff, [], 0)
-    .to(elements.backdrop, { autoAlpha: 1, duration: duration * 0.5, ease: 'power2.out' }, 0)
     .to(elements.panel, { yPercent: 0, duration, ease: 'power3.out' }, 0)
-    .to(elements.stage, { autoAlpha: 1, duration: duration * 0.24, ease: 'power2.out' }, duration * 0.26)
-    .fromTo(
-      [elements.coverEnter, elements.titleEnter, elements.textEnter, elements.linesEnter],
-      { autoAlpha: 0, y: 26 },
-      { autoAlpha: 1, y: 0, duration: duration * 0.42, ease: 'power3.out' },
-      duration * 0.36
-    )
-    .to([elements.toolbar, elements.sideTools], {
-      autoAlpha: 1,
-      duration: duration * 0.32,
-      ease: 'power2.out'
-    }, duration * 0.52)
     .call(callbacks.onUnlock, [], duration * 0.55);
 }
 
-/** 与进入对应的推拉退出：内容先淡出下沉，面板整体推回底部。 */
+/** 与进入对应的推拉退出：面板整体推回底部。 */
 function playSimpleSlideExit(
   timeline: gsap.core.Timeline,
   elements: LyricsTransitionElements,
@@ -2913,14 +2892,7 @@ function playSimpleSlideExit(
   const duration = getLyricsTransitionDuration('exit', false) / 1000;
 
   timeline
-    .to([elements.toolbar, elements.sideTools], { autoAlpha: 0, duration: duration * 0.34, ease: 'power1.in' }, 0)
-    .fromTo(
-      [elements.coverEnter, elements.titleEnter, elements.textEnter, elements.linesEnter],
-      { autoAlpha: 1, y: 0 },
-      { autoAlpha: 0, y: 20, duration: duration * 0.42, ease: 'power2.in' },
-      0
-    )
-    .to(elements.panel, { yPercent: 100, duration, ease: 'power3.inOut' }, duration * 0.14)
+    .to(elements.panel, { yPercent: 100, duration, ease: 'power3.inOut' }, 0)
     .call(callbacks.onReturn, [], duration * 0.5)
     .call(callbacks.onRestore, [], Math.max(duration - 0.04, duration * 0.9));
 }

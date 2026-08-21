@@ -50,6 +50,7 @@ export function App() {
   const hydrateStatuses = useProviderSessionStore((s) => s.hydrateStatuses);
   const loadProviderPlaylists = useLibraryStore((s) => s.loadProviderPlaylists);
   const [loginOpen, setLoginOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [loginProviderId, setLoginProviderId] = useState<RemoteProviderId | undefined>();
   const [lyricsTransition, setLyricsTransition] = useState<{
     origin: LyricsTransitionOrigin;
@@ -102,7 +103,7 @@ export function App() {
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (target.closest('[data-drawer-panel], [data-drawer-trigger]')) return;
+      if (target.closest('[data-drawer-panel], [data-drawer-trigger], .popover-menu')) return;
       const state = useUiStore.getState();
       if (state.isQueueOpen || state.isSimilarOpen) {
         closeAllDrawers();
@@ -234,8 +235,11 @@ export function App() {
   };
 
   return (
-    <div className="app-layout">
-      <Sidebar />
+    <div className={`app-layout${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+      <Sidebar
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+      />
 
       <TopBar onSearch={handleSearch} onOpenLogin={handleOpenLogin} />
 
