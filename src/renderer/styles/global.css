@@ -277,8 +277,10 @@
    并与 yPercent 叠加成双倍位移，使推拉动画全程发生在屏幕外（表现为无动画）。
    首帧保护由 useLayoutEffect 时机保证。 */
 
-/* 面板自带不透明底色随推拉移动；光晕层（components.css .lyrics-dynamic-bg）
-   渲染在面板内部，因此同样跟随进出场 */
+/* 面板自带不透明底色，随推拉一起移动；光晕层（components.css .lyrics-dynamic-bg）
+   渲染在面板内部，因此同样跟随进出场。
+   注意：overlay 的 ::before 纯色遮罩已被下方转场契约隐藏，
+   这层 background 是歌词页唯一的底色来源，绝不能省略。 */
 .lyrics-overlay .lyrics-panel {
   position: relative;
   z-index: 3;
@@ -286,8 +288,12 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
+  /* 纵向 flex：header 固定高、main-body 占满剩余空间（其内部样式依赖 flex item 语义） */
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   isolation: isolate;
+  background: var(--lyrics-overlay-bg-solid);
 }
 
 /* 推拉动画不使用飞行卡/水波/暗角层，永久隐藏 */
