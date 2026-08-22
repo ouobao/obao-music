@@ -1,4 +1,4 @@
-import { ChevronDown, Languages, Maximize2, Menu, Minus, X } from 'lucide-react';
+import { ChevronDown, Languages, Menu } from 'lucide-react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { Fragment, type CSSProperties, type MouseEvent, type RefObject, type WheelEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -36,13 +36,14 @@ import {
   getVariableItemOffset
 } from '../utils/variableVirtualWindow';
 import { PopoverMenu } from './PopoverMenu';
+import { PlayIcon } from './icons';
+import { WindowControls } from './WindowControls';
 import { LyricsPlayerBar } from './PlayerBar';
 
 const centerPointer = centerDepthPointer;
 const isTestRuntime = typeof navigator !== 'undefined' && navigator.userAgent.includes('jsdom');
 const chromeIdleDelayMs = 5000;
 const centerReturnDurationMs = 760;
-const lyricsBoundaryBounceDurationMs = 720;
 const lyricAutoScrollDurationMs = 720;
 const depthPointerSettleDistance = 0.0015;
 const depthPointerFollowAmount = 0.18;
@@ -73,7 +74,6 @@ gsap.registerPlugin(useGSAP);
 type DepthStyle = CSSProperties & Record<`--${string}`, string>;
 type LyricsChromeState = 'visible' | 'hidden';
 type LyricsScrollState = 'settled' | 'scrolling';
-type LyricsBoundaryBounce = 'none' | 'top' | 'bottom';
 type LyricGlowTransition = 'instant' | 'flowing';
 
 interface LyricsMediaClockContext {
@@ -154,7 +154,6 @@ export function LyricsPanel({
   });
   const chromeIdleTimeoutRef = useRef(0);
   const idleDepthStartTimeoutRef = useRef(0);
-  const lyricsBoundaryBounceTimeoutRef = useRef(0);
   const lyricsAutoScrollFrameRef = useRef(0);
   const lyricsVirtualScrollFrameRef = useRef(0);
   const lyricsScrollIdleTimeoutRef = useRef(0);
@@ -182,12 +181,10 @@ export function LyricsPanel({
   const [depthMode, setDepthMode] = useState(depthStateRef.current.mode);
   const [chromeState, setChromeState] = useState<LyricsChromeState>('visible');
   const [lyricsScrollState, setLyricsScrollState] = useState<LyricsScrollState>('settled');
-  const [lyricsBoundaryBounce, setLyricsBoundaryBounce] = useState<LyricsBoundaryBounce>('none');
   const [showTranslation, setShowTranslation] = useState(false);
   const [fontScale, setFontScale] = useState(readStoredLyricFontScale);
   const [isLyricsMenuOpen, setIsLyricsMenuOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
-  const [seekTargetIndex, setSeekTargetIndex] = useState<number | null>(null);
   const [isLyricMediaClockActive, setLyricMediaClockActiveState] = useState(false);
   const [lyricGlowTransition, setLyricGlowTransitionState] = useState<LyricGlowTransition>('flowing');
   const [lyricLineSizeRevision, setLyricLineSizeRevision] = useState(0);
@@ -286,11 +283,8 @@ export function LyricsPanel({
     if (activeIndex >= 0 && activeIndex < renderedLyricCount) {
       indexes.add(activeIndex);
     }
-    if (seekTargetIndex !== null && seekTargetIndex >= 0 && seekTargetIndex < renderedLyricCount) {
-      indexes.add(seekTargetIndex);
-    }
     return [...indexes].sort((left, right) => left - right);
-  }, [activeIndex, lyricVirtualRange, lyricsVirtualized, renderedLyricCount, seekTargetIndex]);
+  }, [activeIndex, lyricVirtualRange, lyricsVirtualized, renderedLyricCount]);
   const lyricMotionOriginIndex = lyricMotionOriginIndexRef.current;
   const lyricDurationMs = playbackDurationMs || currentSong?.durationMs || 0;
   const activeLineProgress = getLyricLineProgress(
@@ -379,8 +373,8 @@ export function LyricsPanel({
   }
 
   function resolveLyricsTransitionElements(panel: HTMLDivElement) {
-    const backdrop = backdropRef.current;
-    const toolbar = panel.querySelector<HTMLElement>('.lyrics-toolbar');
+    const backdrop = (backdropRef.current ?? panel.querySelector<HTMLElement>('.lyrics-dynamic-bg')) as HTMLDivElement | null;
+    const toolbar = panel.querySelector<HTMLElement>('.lyrics-header');
     const sideTools = sideToolsRef.current;
     const stage = stageRef.current;
     const artwork = artworkRef.current;
@@ -392,15 +386,15 @@ export function LyricsPanel({
     const ripple = transitionRippleRef.current;
     const displacement = transitionDisplacementRef.current;
     const overlay = panel.closest<HTMLElement>('.lyrics-overlay');
-    const coverEnter = panel.querySelector<HTMLElement>('.lyrics-cover-enter');
-    const titleEnter = panel.querySelector<HTMLElement>('.lyrics-title-enter');
-    const textEnter = panel.querySelector<HTMLElement>('.lyrics-text-enter');
-    const linesEnter = panel.querySelector<HTMLElement>('.lyrics-lines-enter');
+    const coverEnter = panel.querySelector<HTMLElement>('.lyrics-artwork-container');
+    const titleEnter = panel.querySelector<HTMLElement>('.lyrics-artwork-meta');
+    const textEnter = panel.querySelector<HTMLElement>('.lyrics-scroll-zone');
+    const linesEnter = panel.querySelector<HTMLElement>('.lyrics-scroll-container');
     const sourceCover = document.querySelector<HTMLElement>('.song-cover-wrapper');
     const edges = flight ? Array.from(flight.querySelectorAll<HTMLElement>('.lyrics-transition-edge')) : [];
     const refractionTargets = [
-      panel.querySelector<HTMLElement>('.lyrics-toolbar'),
-      panel.querySelector<HTMLElement>('.lyrics-side-tools'),
+      panel.querySelector<HTMLElement>('.lyrics-header'),
+      panel.querySelector<HTMLElement>('.lyrics-header-actions'),
       titleEnter,
       textEnter
     ].filter((element): element is HTMLElement => element !== null);
@@ -903,7 +897,6 @@ export function LyricsPanel({
       cancelLyricMediaClockFrame();
       clearChromeIdleTimer();
       clearIdleDepthStartTimer();
-      clearLyricsBoundaryBounceTimer();
       clearLyricsAutoScrollFrame();
       clearLyricsVirtualScrollFrame();
       clearLyricsScrollIdleTimer();
@@ -1073,7 +1066,6 @@ export function LyricsPanel({
     }
 
     const updateAnchorSpaces = () => {
-      applyLyricAnchorSpaces(viewport);
       const viewportSize = viewport.clientHeight || 540;
       setLyricsVirtualViewport((current) => (
         current.viewportSize === viewportSize
@@ -1435,10 +1427,10 @@ export function LyricsPanel({
         document.body
       ) : null}
       <section
-      className="lyrics-overlay"
+      className={`lyrics-overlay${chromeState === 'hidden' ? ' chrome-hidden' : ''}`}
       role="dialog"
       aria-modal="true"
-      aria-label="姝岃瘝璇︽儏"
+      aria-label="歌词详情"
       data-transition-origin={transitionOrigin ? 'player-cover' : 'fallback'}
       data-transition-phase={transitionPhase}
       data-reduce-effects={reduceEffects ? 'true' : 'false'}
@@ -1452,13 +1444,10 @@ export function LyricsPanel({
       />
       <div
         className="lyrics-panel"
-        data-chrome-state={chromeState}
-        data-depth-mode={depthMode}
         ref={panelRef}
-        style={{ '--lyrics-font-scale': String(fontScale) } as DepthStyle}
+        style={{ '--lyrics-scale': String(fontScale) } as DepthStyle}
         onMouseMove={handlePanelPointerMove}
       >
-        <div className="lyrics-backdrop" ref={backdropRef} />
         <div className="lyrics-transition-ripple" aria-hidden="true" ref={transitionRippleRef} />
         <svg className="lyrics-transition-filter-defs" aria-hidden="true" focusable="false">
           <defs>
@@ -1482,28 +1471,35 @@ export function LyricsPanel({
             </filter>
           </defs>
         </svg>
-        <div className="lyrics-window-drag-surface" aria-hidden="true" />
-        <div className="lyrics-toolbar" data-chrome-state={chromeState}>
-          <button
-            className="icon-button liquid-glass-button lyrics-collapse"
-            type="button"
-            aria-label="收起歌词页"
-            onClick={closeLyricsPanel}
-          >
-            <ChevronDown aria-hidden="true" size={20} />
-          </button>
-          <div className="lyrics-drag-space" aria-hidden="true" />
-          <div className="lyrics-side-tools" ref={sideToolsRef}>
+        <div className="lyrics-dynamic-bg" aria-hidden="true">
+          <span className="lyrics-glow-orb lyrics-glow-1" />
+          <span className="lyrics-glow-orb lyrics-glow-2" />
+        </div>
+        <header className="lyrics-header">
+          <div className="lyrics-header-left">
             <button
-              className="icon-button liquid-glass-button lyrics-menu-button"
+              className="lyrics-header-btn"
               type="button"
-              aria-label="歌词页设置"
+              title="收起歌词页"
+              aria-label="收起歌词页"
+              onClick={closeLyricsPanel}
+            >
+              <ChevronDown aria-hidden="true" size={16} />
+            </button>
+          </div>
+          <div className="lyrics-header-title" title={songTitle}>{songTitle}</div>
+          <div className="lyrics-header-actions" ref={sideToolsRef}>
+            <button
+              className="lyrics-header-btn"
+              type="button"
+              title="歌词设置"
+              aria-label="歌词设置"
               aria-haspopup="menu"
               aria-expanded={isLyricsMenuOpen}
               ref={menuButtonRef}
               onClick={() => setIsLyricsMenuOpen((value) => !value)}
             >
-              <Menu aria-hidden="true" size={18} />
+              <Menu aria-hidden="true" size={15} />
             </button>
             {typeof document !== 'undefined' ? (
               <PopoverMenu
@@ -1516,127 +1512,76 @@ export function LyricsPanel({
                 items={lyricsMenuItems}
               />
             ) : null}
-            <div className="lyrics-window-controls" aria-label="窗口控制">
-              <button className="window-control-button" type="button" aria-label="最小化窗口" onClick={minimizeWindow}>
-                <Minus aria-hidden="true" size={16} />
-              </button>
-              <button className="window-control-button" type="button" aria-label="最大化窗口" onClick={toggleLyricsFullscreen}>
-                <Maximize2 aria-hidden="true" size={15} />
-              </button>
-              <button className="window-control-button window-close-button" type="button" aria-label="关闭窗口" onClick={closeWindow}>
-                <X aria-hidden="true" size={16} />
-              </button>
-            </div>
+            <WindowControls />
           </div>
-        </div>
+        </header>
 
-        <section
-          className="playback-stage-3d"
-          aria-label="3D 鎾斁鑸炲彴"
-          ref={stageRef}
-          style={stageStyle}
-        >
-          <div className="lyrics-depth-background" aria-hidden="true">
-            <div className="stage-orbit">
-              <span className="stage-orbit-ring stage-orbit-ring-a" />
-              <span className="stage-orbit-ring stage-orbit-ring-b" />
-              <span className="stage-orbit-glow" />
-            </div>
-          </div>
-
-          <div className="lyrics-depth-cover">
-            <div
-              className="lyrics-cover-enter"
-              style={
-                {
-                  '--cover-tone': coverPalette.tone,
-                  '--song-cover-image': coverImage,
-                  '--lyrics-cover-shadow': coverPalette.shadow
-                } as DepthStyle
-              }
-            >
+        <main className="lyrics-main-body" ref={stageRef} style={stageStyle}>
+          <section
+            className="lyrics-artwork-container lyrics-cover-enter"
+            style={
+              {
+                '--cover-tone': coverPalette.tone,
+                '--lyrics-cover-shadow': coverPalette.shadow
+              } as DepthStyle
+            }
+          >
+            <div className="lyrics-big-cover-anchor">
               <div
-                className="lyrics-art"
+                className="lyrics-big-cover"
                 ref={artworkRef}
                 style={
                   {
                     '--cover-tone': coverPalette.tone,
-                    '--song-cover-image': coverImage,
-                    '--lyrics-cover-shadow': coverPalette.shadow
+                    '--song-cover-image': coverImage
                   } as DepthStyle
                 }
-              >
-                {!hasCoverImage ? (
-                  <>
-                    <span className="stage-disc-groove" />
-                    <span className="stage-disc-label" />
-                  </>
-                ) : null}
-              </div>
+              />
             </div>
-          </div>
+            <div className="lyrics-artwork-meta">
+              <h2 className="lyrics-song-title" title={songTitle}>
+                {songTitle}
+              </h2>
+              {primaryArtist ? (
+                <button
+                  className="lyrics-song-artist"
+                  type="button"
+                  title={currentSong?.artist}
+                  aria-label={`Search artist ${primaryArtist}`}
+                  onClick={handleArtistClick}
+                >
+                  <span className="lyrics-song-artist-text">{primaryArtist}</span>
+                </button>
+              ) : null}
+            </div>
+          </section>
 
-          <div className="lyrics-depth-title">
-            <div className="lyrics-title-enter">
-              <div className="lyrics-content">
-                <h2 className="lyrics-song-title" data-title={songTitle} title={songTitle}>
-                  {songTitle}
-                </h2>
-                {primaryArtist ? (
-                  <button
-                    className="lyrics-song-artist"
-                    type="button"
-                    title={currentSong?.artist}
-                    aria-label={`Search artist ${primaryArtist}`}
-                    onClick={handleArtistClick}
+          <section className="lyrics-scroll-zone">
+            <div className="lyrics-scroll-wrap">
+              <div
+                className={`lyrics-scroll-container${lyricsScrollState === 'scrolling' ? ' user-scrolling' : ''}`}
+                data-lyric-glow-transition={lyricGlowTransition}
+                data-lyric-media-clock={isLyricMediaClockActive ? 'active' : 'fallback'}
+                data-virtualized={lyricsVirtualized ? 'true' : 'false'}
+                ref={lyricsLinesRef}
+                onScroll={handleLyricsScroll}
+                onWheel={handleLyricsWheel}
+              >
+                {lyricStatusMessage ? <p className="lyrics-status">{lyricStatusMessage}</p> : null}
+                {lyricsVirtualized ? (
+                  <div
+                    className="lyrics-virtual-space"
+                    style={{ '--lyrics-virtual-height': `${lyricVirtualLayout.totalHeight}px` } as DepthStyle}
                   >
-                    <span className="lyrics-song-artist-text">{primaryArtist}</span>
-                  </button>
-                ) : null}
+                    {lyricVirtualIndexes.map((index) => renderLyricRow(index, true))}
+                  </div>
+                ) : (
+                  Array.from({ length: renderedLyricCount }, (_, index) => renderLyricRow(index, false))
+                )}
               </div>
             </div>
-          </div>
-
-          <div className="lyrics-depth-text">
-            {lyricsScrollState === 'scrolling' && seekTargetIndex !== null && lines[seekTargetIndex] ? (
-              <button
-                className="lyric-seek-cue"
-                type="button"
-                aria-label={`跳转到 ${formatLyricTime(lines[seekTargetIndex].startMs)}`}
-                onClick={() => handleSeekCueClick(seekTargetIndex)}
-              >
-                {formatLyricTime(lines[seekTargetIndex].startMs)}
-              </button>
-            ) : null}
-            <div className="lyrics-text-enter">
-              <div className="lyrics-lines-enter">
-                <div
-                  className="lyrics-lines"
-                  data-boundary-bounce={lyricsBoundaryBounce}
-                   data-lyric-glow-transition={lyricGlowTransition}
-                   data-lyric-media-clock={isLyricMediaClockActive ? 'active' : 'fallback'}
-                   data-scroll-state={lyricsScrollState}
-                   data-virtualized={lyricsVirtualized ? 'true' : 'false'}
-                   ref={lyricsLinesRef}
-                   onScroll={handleLyricsScroll}
-                   onWheel={handleLyricsWheel}
-                 >
-                   {lyricStatusMessage ? <p className="lyrics-status">{lyricStatusMessage}</p> : null}
-                  {lyricsVirtualized ? (
-                    <div
-                      className="lyrics-virtual-space"
-                      style={{ '--lyrics-virtual-height': `${lyricVirtualLayout.totalHeight}px` } as DepthStyle}
-                    >
-                      {lyricVirtualIndexes.map((index) => renderLyricRow(index, true))}
-                    </div>
-                  ) : (
-                    Array.from({ length: renderedLyricCount }, (_, index) => renderLyricRow(index, false))
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+          </section>
+        </main>
         <LyricsPlayerBar reduceEffects={reduceEffects} />
       </div>
       </section>
@@ -1652,9 +1597,9 @@ export function LyricsPanel({
 
     const key = timedLine ? `${timedLine.startMs}-${timedLine.text}` : `${plainLine}-${index}`;
     const row = timedLine ? renderTimedLyricLine(timedLine, index) : (
-      <p className="lyric-line" data-lyric-index={index}>
+      <div className={`lyric-line ${getLyricLineDistanceClass(index)}`} data-lyric-index={index}>
         <span className="lyric-line-text">{plainLine}</span>
-      </p>
+      </div>
     );
 
     if (!virtualized) {
@@ -1677,43 +1622,70 @@ export function LyricsPanel({
     );
   }
 
+  function getLyricLineDistanceClass(index: number) {
+    if (index === activeIndex) {
+      return 'active';
+    }
+
+    const delta = Math.abs(index - activeIndex);
+    if (delta === 1) return 'near-1';
+    if (delta === 2) return 'near-2';
+    if (delta === 3) return 'far-1';
+    return 'far-2';
+  }
+
+  function handleLyricLineClick(index: number) {
+    const line = lines[index];
+    if (!line || index > activeIndex) {
+      return;
+    }
+
+    seekPlayback(line.startMs, lyricDurationMs);
+  }
+
   function renderTimedLyricLine(line: (typeof lines)[number], index: number) {
     const isActive = index === activeIndex;
     const lineProgress = isActive ? activeLineProgress : index < activeIndex ? 1 : 0;
     const isLongActiveLine = isActive && Array.from(line.text).length > lyricLongLineThreshold;
     const lyricDistance = getLyricDistance(index, activeIndex);
-    const lyricSignedDistance = getLyricSignedDistance(index, activeIndex);
     const translation = translationsByStartMs.get(line.startMs);
     const className = [
       'lyric-line',
-      isActive ? 'lyric-active' : '',
-      isLongActiveLine ? 'lyric-long-line' : '',
-      lyricsScrollState === 'scrolling' && seekTargetIndex === index ? 'lyric-seek-target' : ''
+      getLyricLineDistanceClass(index),
+      isLongActiveLine ? 'lyric-long-line' : ''
     ].filter(Boolean).join(' ');
 
     return (
-      <p
+      <div
         className={className}
         ref={isActive ? activeLineRef : undefined}
         style={
           {
-            '--lyric-line-progress': formatProgressPercent(lineProgress),
-            '--lyric-distance': String(lyricDistance),
-            '--lyric-signed-distance': String(lyricSignedDistance),
-            '--lyric-flow-rank': String(getLyricFlowRank(index, activeIndex, lyricMotionOriginIndex))
+            '--lyric-line-progress': formatProgressPercent(lineProgress)
           } as DepthStyle
         }
         aria-current={isActive ? 'true' : undefined}
         data-lyric-index={index}
         data-lyric-motion={lyricDistance <= 5 ? 'active' : undefined}
         data-timed-lyric="true"
+        onClick={() => handleLyricLineClick(index)}
       >
-        <span className="lyric-line-text" aria-label={line.text}>
-          <span className="lyric-line-text-base">{line.text}</span>
-          <span className="lyric-line-text-fill" aria-hidden="true">{line.text}</span>
-        </span>
-        {showTranslation && translation ? <span className="lyrics-translation-text">{translation}</span> : null}
-      </p>
+        <button
+          className="lyric-hover-play-btn"
+          type="button"
+          tabIndex={-1}
+          aria-hidden="true"
+        >
+          <PlayIcon size={13} strokeWidth={2.4} filled />
+        </button>
+        <div className="lyric-text-content">
+          <span className="lyric-line-text" aria-label={line.text}>
+            <span className="lyric-line-text-base">{line.text}</span>
+            <span className="lyric-line-text-fill" aria-hidden="true">{line.text}</span>
+          </span>
+          {showTranslation && translation ? <span className="lyrics-translation-text">{translation}</span> : null}
+        </div>
+      </div>
     );
   }
 
@@ -1746,15 +1718,6 @@ export function LyricsPanel({
     showLyricsChrome();
   }
 
-  function toggleLyricsFullscreen() {
-    const fullscreenApi = window.musicPlayer?.window.toggleFullscreen;
-    if (!fullscreenApi) {
-      return;
-    }
-
-    void fullscreenApi();
-  }
-
   function markLyricFontAdjustment() {
     isAdjustingLyricFontRef.current = true;
     clearFontScaleScrollGuardTimer();
@@ -1778,61 +1741,12 @@ export function LyricsPanel({
     }
 
     setLyricsScrollState('scrolling');
-    setSeekTargetIndex(findLyricSeekTargetIndex());
     clearLyricsScrollIdleTimer();
     lyricsScrollIdleTimeoutRef.current = window.setTimeout(() => {
       setLyricsScrollState('settled');
-      setSeekTargetIndex(null);
       scrollActiveLyricIntoView();
       lyricsScrollIdleTimeoutRef.current = 0;
     }, 3000);
-  }
-
-  function handleSeekCueClick(index: number) {
-    const line = lines[index];
-    if (!line) {
-      return;
-    }
-
-    seekPlayback(line.startMs, lyricDurationMs);
-    setLyricsScrollState('settled');
-    setSeekTargetIndex(null);
-  }
-
-  function findLyricSeekTargetIndex() {
-    const viewport = lyricsLinesRef.current;
-    if (!viewport || lines.length === 0) {
-      return null;
-    }
-
-    if (lyricsVirtualized) {
-      const { head } = getLyricAnchorSpaces(viewport.clientHeight);
-      return findVariableItemAtViewportCenter(
-        lyricVirtualLayout,
-        Math.max(0, viewport.scrollTop - head),
-        viewport.clientHeight
-      );
-    }
-
-    const lineElements = Array.from(viewport.querySelectorAll<HTMLElement>('.lyric-line')).slice(0, lines.length);
-    if (lineElements.length === 0) {
-      return null;
-    }
-
-    const viewportCenter = viewport.scrollTop + viewport.clientHeight * 0.5;
-    let closestIndex = 0;
-    let closestDistance = Number.POSITIVE_INFINITY;
-
-    lineElements.forEach((lineElement, index) => {
-      const lineCenter = lineElement.offsetTop + lineElement.offsetHeight * 0.5;
-      const distance = Math.abs(lineCenter - viewportCenter);
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestIndex = index;
-      }
-    });
-
-    return closestIndex;
   }
 
   function handleLyricsWheel(event: WheelEvent<HTMLDivElement>) {
@@ -1843,15 +1757,8 @@ export function LyricsPanel({
     const isAtTop = viewport.scrollTop <= 0;
     const isAtBottom = viewport.scrollTop >= maxScrollTop - 1;
 
-    if (event.deltaY < 0 && isAtTop) {
+    if ((event.deltaY < 0 && isAtTop) || (event.deltaY > 0 && isAtBottom)) {
       event.preventDefault();
-      triggerLyricsBoundaryBounce('top');
-      return;
-    }
-
-    if (event.deltaY > 0 && isAtBottom) {
-      event.preventDefault();
-      triggerLyricsBoundaryBounce('bottom');
     }
   }
 
@@ -1929,24 +1836,6 @@ export function LyricsPanel({
     idleDepthStartTimeoutRef.current = 0;
   }
 
-  function triggerLyricsBoundaryBounce(direction: Exclude<LyricsBoundaryBounce, 'none'>) {
-    clearLyricsBoundaryBounceTimer();
-    setLyricsBoundaryBounce(direction);
-    lyricsBoundaryBounceTimeoutRef.current = window.setTimeout(() => {
-      setLyricsBoundaryBounce('none');
-      lyricsBoundaryBounceTimeoutRef.current = 0;
-    }, lyricsBoundaryBounceDurationMs);
-  }
-
-  function clearLyricsBoundaryBounceTimer() {
-    if (!lyricsBoundaryBounceTimeoutRef.current) {
-      return;
-    }
-
-    window.clearTimeout(lyricsBoundaryBounceTimeoutRef.current);
-    lyricsBoundaryBounceTimeoutRef.current = 0;
-  }
-
   function clearLyricsScrollIdleTimer() {
     if (!lyricsScrollIdleTimeoutRef.current) {
       return;
@@ -2017,11 +1906,10 @@ export function LyricsPanel({
 
     isAutoScrollingLyricsRef.current = true;
     clearLyricsAutoScrollFrame();
-    applyLyricAnchorSpaces(viewport);
 
     const targetTop = lyricsVirtualized
       ? getAnchoredLyricScrollTop({
-          lineTop: getLyricAnchorSpaces(viewport.clientHeight).head + getVariableItemOffset(lyricVirtualLayout, activeIndex),
+          lineTop: parseScrollPaddingTop(viewport) + getVariableItemOffset(lyricVirtualLayout, activeIndex),
           lineHeight: lyricLineSizesRef.current[activeIndex] ?? lyricVirtualLayout.estimate,
           viewportHeight: viewport.clientHeight,
           scrollHeight: viewport.scrollHeight
@@ -2339,10 +2227,9 @@ export function getLyricAnchorSpaces(viewportHeight: number) {
   };
 }
 
-function applyLyricAnchorSpaces(viewport: HTMLElement) {
-  const { head, tail } = getLyricAnchorSpaces(viewport.clientHeight);
-  viewport.style.setProperty('--lyrics-anchor-head-space', `${head}px`);
-  viewport.style.setProperty('--lyrics-anchor-tail-space', `${tail}px`);
+/** 滚动容器的上 padding：虚拟行偏移不含 padding，锚定计算需要补回 */
+function parseScrollPaddingTop(viewport: HTMLElement) {
+  return parseFloat(window.getComputedStyle(viewport).paddingTop) || 0;
 }
 
 export function createAnchoredLyricScrollFrame(startTop: number, targetTop: number, elapsedMs: number, durationMs = lyricAutoScrollDurationMs) {
@@ -2889,10 +2776,3 @@ function formatPointer(value: number) {
   return String(Math.round(value * 1000) / 1000);
 }
 
-function minimizeWindow() {
-  void window.musicPlayer?.window.minimize();
-}
-
-function closeWindow() {
-  void window.musicPlayer?.window.close();
-}
