@@ -1,4 +1,4 @@
-import { CaseSensitive, ChevronDown, Languages, Maximize2, Minus, X } from 'lucide-react';
+import { ChevronDown, Languages, Maximize2, Menu, Minus, X } from 'lucide-react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { Fragment, type CSSProperties, type MouseEvent, type RefObject, type WheelEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -16,8 +16,6 @@ import { createLyricsRequestKey, useLyricsStore } from '../state/lyricsStore';
 import { usePlayerStore } from '../state/playerStore';
 import { useSearchStore } from '../state/searchStore';
 import { useUiStore } from '../state/uiStore';
-import { useAnimatedPresence } from '../hooks/useAnimatedPresence';
-import { useAnchoredPopoverStyle } from '../hooks/useAnchoredPopoverStyle';
 import { useCoverPalette } from '../hooks/useCoverPalette';
 import {
   createFallbackLyricsTransitionOrigin,
@@ -37,14 +35,13 @@ import {
   findVariableItemAtViewportCenter,
   getVariableItemOffset
 } from '../utils/variableVirtualWindow';
-import { ElasticVerticalRange } from './ElasticVerticalRange';
+import { PopoverMenu } from './PopoverMenu';
 import { LyricsPlayerBar } from './PlayerBar';
 
 const centerPointer = centerDepthPointer;
 const isTestRuntime = typeof navigator !== 'undefined' && navigator.userAgent.includes('jsdom');
 const chromeIdleDelayMs = 5000;
 const centerReturnDurationMs = 760;
-const translationUnavailableResetDelayMs = 2600;
 const lyricsBoundaryBounceDurationMs = 720;
 const lyricAutoScrollDurationMs = 720;
 const depthPointerSettleDistance = 0.0015;
@@ -53,6 +50,13 @@ const defaultCoverTone = 'linear-gradient(135deg, #d84848, #2f6f90)';
 const lyricFontScaleStorageKey = 'musicplayer.lyrics-font-scale';
 const lyricFontScaleMin = 0.86;
 const lyricFontScaleMax = 1.24;
+/** 汉堡菜单中的字号档位（连续滑块已废弃） */
+const lyricFontScaleSteps: { label: string; value: number }[] = [
+  { label: '小', value: 0.86 },
+  { label: '标准', value: 1 },
+  { label: '大', value: 1.12 },
+  { label: '特大', value: 1.24 }
+];
 const fontScaleScrollGuardMs = 320;
 const lyricAnchorViewportRatio = 0.44;
 const lyricVirtualizationThreshold = 80;
@@ -137,8 +141,7 @@ export function LyricsPanel({
   const transitionInitFrameRef = useRef(0);
   const transitionGeometryRef = useRef<LyricsTransitionSessionGeometry | null>(null);
   const sideToolsRef = useRef<HTMLDivElement | null>(null);
-  const fontButtonRef = useRef<HTMLButtonElement | null>(null);
-  const fontPopoverRef = useRef<HTMLDivElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const lyricsLinesRef = useRef<HTMLDivElement | null>(null);
   const activeLineRef = useRef<HTMLParagraphElement | null>(null);
   const playbackPositionRef = useRef(usePlayerStore.getState().playbackPositionMs);
@@ -151,7 +154,6 @@ export function LyricsPanel({
   });
   const chromeIdleTimeoutRef = useRef(0);
   const idleDepthStartTimeoutRef = useRef(0);
-  const translationUnavailableTimeoutRef = useRef(0);
   const lyricsBoundaryBounceTimeoutRef = useRef(0);
   const lyricsAutoScrollFrameRef = useRef(0);
   const lyricsVirtualScrollFrameRef = useRef(0);
@@ -183,7 +185,7 @@ export function LyricsPanel({
   const [lyricsBoundaryBounce, setLyricsBoundaryBounce] = useState<LyricsBoundaryBounce>('none');
   const [showTranslation, setShowTranslation] = useState(false);
   const [fontScale, setFontScale] = useState(readStoredLyricFontScale);
-  const [isFontPopoverOpen, setFontPopoverOpen] = useState(false);
+  const [isLyricsMenuOpen, setIsLyricsMenuOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [seekTargetIndex, setSeekTargetIndex] = useState<number | null>(null);
   const [isLyricMediaClockActive, setLyricMediaClockActiveState] = useState(false);
@@ -203,16 +205,6 @@ export function LyricsPanel({
       setLyricGlowTransition('instant');
     }
   }, [currentSong?.id, playbackSeekRevision]);
-  const fontPopoverPresence = useAnimatedPresence(isFontPopoverOpen);
-  const fontPopoverStyle = useAnchoredPopoverStyle({
-    anchorRef: fontButtonRef,
-    gap: 10,
-    height: 148,
-    offsetY: 8,
-    open: fontPopoverPresence.isMounted,
-    placement: 'left-end',
-    width: 56
-  });
   const stageStyle = useMemo(() => createDepthStyle(centerPointer), []);
   const currentLyricsKey = currentSong ? createLyricsRequestKey(currentSong) : null;
   const ownsCurrentLyrics = currentLyricsKey !== null && lyricsSongKey === currentLyricsKey;
@@ -236,8 +228,26 @@ export function LyricsPanel({
   );
   const hasTranslations = translationsByStartMs.size > 0;
   const canToggleTranslation = Boolean(currentSong && effectiveLrc);
-  const showTranslationUnavailable = showTranslation && canToggleTranslation && !hasTranslations;
-  const translationUnavailablePresence = useAnimatedPresence(showTranslationUnavailable);
+  const lyricsMenuItems = useMemo(() => [
+    {
+      key: 'translation',
+      icon: <Languages size={14} strokeWidth={2} />,
+      label: showTranslation ? '隐藏译文' : '显示译文',
+      checked: showTranslation,
+      disabled: !canToggleTranslation || (showTranslation && !hasTranslations),
+      onSelect: () => setShowTranslation((value) => !value)
+    },
+    {
+      key: 'font-scale',
+      label: '歌词字号',
+      children: lyricFontScaleSteps.map((step) => ({
+        key: `font-${step.value}`,
+        label: step.label,
+        checked: Math.abs(fontScale - step.value) < 0.045,
+        onSelect: () => handleFontScaleChange(step.value)
+      }))
+    }
+  ], [canToggleTranslation, fontScale, hasTranslations, showTranslation]);
   const plainLyricLines = useMemo(() => (effectiveLrc && lines.length === 0 ? createPlainLyricLines(effectiveLrc) : []), [effectiveLrc, lines.length]);
   const renderedLyricCount = lines.length || plainLyricLines.length;
   const lyricsVirtualized = renderedLyricCount > lyricVirtualizationThreshold;
@@ -893,7 +903,6 @@ export function LyricsPanel({
       cancelLyricMediaClockFrame();
       clearChromeIdleTimer();
       clearIdleDepthStartTimer();
-      clearTranslationUnavailableTimer();
       clearLyricsBoundaryBounceTimer();
       clearLyricsAutoScrollFrame();
       clearLyricsVirtualScrollFrame();
@@ -923,34 +932,6 @@ export function LyricsPanel({
     scheduleChromeIdleHide();
     return () => clearChromeIdleTimer();
   }, [transitionPhase]);
-
-  useEffect(() => {
-    if (!isFontPopoverOpen) {
-      return;
-    }
-
-    const handleOutsidePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-
-      // 点击字体弹窗内部不关闭
-      if (target instanceof Node && fontPopoverRef.current?.contains(target)) {
-        return;
-      }
-
-      // 点击字体按钮本身不关闭（按钮自身会 toggle）
-      if (target instanceof Node && fontButtonRef.current?.contains(target)) {
-        return;
-      }
-
-      setFontPopoverOpen(false);
-    };
-
-    document.addEventListener('pointerdown', handleOutsidePointerDown, true);
-
-    return () => {
-      document.removeEventListener('pointerdown', handleOutsidePointerDown, true);
-    };
-  }, [isFontPopoverOpen]);
 
   useEffect(() => {
     const handleWindowDepthPointerMove = (event: globalThis.MouseEvent) => {
@@ -1157,21 +1138,6 @@ export function LyricsPanel({
 
     scrollActiveLyricIntoView();
   }, [activeIndex, lines.length, lyricsScrollState]);
-
-  useEffect(() => {
-    clearTranslationUnavailableTimer();
-
-    if (!showTranslationUnavailable) {
-      return;
-    }
-
-    translationUnavailableTimeoutRef.current = window.setTimeout(() => {
-      setShowTranslation(false);
-      translationUnavailableTimeoutRef.current = 0;
-    }, translationUnavailableResetDelayMs);
-
-    return () => clearTranslationUnavailableTimer();
-  }, [showTranslationUnavailable]);
 
   useEffect(() => {
     document.documentElement.style.setProperty('--lyrics-cover-tone', coverPalette.tone);
@@ -1433,9 +1399,9 @@ export function LyricsPanel({
         return;
       }
 
-      if (isFontPopoverOpen) {
+      if (isLyricsMenuOpen) {
         event.preventDefault();
-        setFontPopoverOpen(false);
+        setIsLyricsMenuOpen(false);
         return;
       }
 
@@ -1445,7 +1411,7 @@ export function LyricsPanel({
 
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [closeLyricsPanel, isFontPopoverOpen]);
+  }, [closeLyricsPanel, isLyricsMenuOpen]);
 
   return (
     <>
@@ -1527,74 +1493,41 @@ export function LyricsPanel({
             <ChevronDown aria-hidden="true" size={20} />
           </button>
           <div className="lyrics-drag-space" aria-hidden="true" />
-          <div className="lyrics-window-controls" aria-label="绐楀彛鎺у埗">
-            <button className="window-control-button" type="button" aria-label="鏈€灏忓寲绐楀彛" onClick={minimizeWindow}>
-              <Minus aria-hidden="true" size={16} />
-            </button>
-            <button className="window-control-button" type="button" aria-label="鏈€澶у寲绐楀彛" onClick={toggleLyricsFullscreen}>
-              <Maximize2 aria-hidden="true" size={15} />
-            </button>
-            <button className="window-control-button window-close-button" type="button" aria-label="鍏抽棴绐楀彛" onClick={closeWindow}>
-              <X aria-hidden="true" size={16} />
-            </button>
-          </div>
-        </div>
-
-        <div className="lyrics-side-tools" ref={sideToolsRef}>
-          <button
-            className="lyrics-translation-toggle"
-            type="button"
-            aria-label={showTranslation ? '闅愯棌璇戞枃' : '鏄剧ず璇戞枃'}
-            aria-pressed={showTranslation}
-            data-state={showTranslation ? 'on' : 'off'}
-            disabled={!canToggleTranslation}
-            onClick={() => setShowTranslation((value) => !value)}
-          >
-            <Languages aria-hidden="true" size={18} />
-          </button>
-          {translationUnavailablePresence.isMounted ? (
-            <span
-              className="lyrics-translation-unavailable"
-              role="status"
-              data-state={translationUnavailablePresence.state}
+          <div className="lyrics-side-tools" ref={sideToolsRef}>
+            <button
+              className="icon-button liquid-glass-button lyrics-menu-button"
+              type="button"
+              aria-label="歌词页设置"
+              aria-haspopup="menu"
+              aria-expanded={isLyricsMenuOpen}
+              ref={menuButtonRef}
+              onClick={() => setIsLyricsMenuOpen((value) => !value)}
             >
-              鏆傛棤璇戞枃
-            </span>
-          ) : null}
-          <button
-            className="lyrics-font-button"
-            type="button"
-            aria-label="姝岃瘝瀛楀彿"
-            aria-expanded={isFontPopoverOpen}
-            ref={fontButtonRef}
-            onClick={() => setFontPopoverOpen((value) => !value)}
-          >
-            <CaseSensitive aria-hidden="true" size={19} />
-          </button>
-          {fontPopoverPresence.isMounted && typeof document !== 'undefined' ? createPortal(
-            <div
-              className="lyrics-font-popover glass-surface"
-              role="dialog"
-              aria-label="歌词字号"
-              data-state={fontPopoverPresence.state}
-              ref={fontPopoverRef}
-              style={fontPopoverStyle}
-            >
-              <ElasticVerticalRange
-                className="lyrics-font-slider"
-                min={lyricFontScaleMin}
-                max={lyricFontScaleMax}
-                step={0.01}
-                value={fontScale}
-                aria-label="姝岃瘝瀛楀彿"
-                aria-orientation="vertical"
-                surfaceRef={fontPopoverRef}
-                onPointerDown={markLyricFontAdjustment}
-                onValueChange={handleFontScaleChange}
+              <Menu aria-hidden="true" size={18} />
+            </button>
+            {typeof document !== 'undefined' ? (
+              <PopoverMenu
+                open={isLyricsMenuOpen}
+                onClose={() => setIsLyricsMenuOpen(false)}
+                triggerRef={menuButtonRef}
+                position="bottom"
+                align="right"
+                ariaLabel="歌词页设置"
+                items={lyricsMenuItems}
               />
-            </div>,
-            document.body
-          ) : null}
+            ) : null}
+            <div className="lyrics-window-controls" aria-label="窗口控制">
+              <button className="window-control-button" type="button" aria-label="最小化窗口" onClick={minimizeWindow}>
+                <Minus aria-hidden="true" size={16} />
+              </button>
+              <button className="window-control-button" type="button" aria-label="最大化窗口" onClick={toggleLyricsFullscreen}>
+                <Maximize2 aria-hidden="true" size={15} />
+              </button>
+              <button className="window-control-button window-close-button" type="button" aria-label="关闭窗口" onClick={closeWindow}>
+                <X aria-hidden="true" size={16} />
+              </button>
+            </div>
+          </div>
         </div>
 
         <section
@@ -1942,32 +1875,12 @@ export function LyricsPanel({
   }
 
   function restoreWindowAfterLyrics(): Promise<boolean> {
-    if (windowRestorePromiseRef.current) {
-      return windowRestorePromiseRef.current;
+    // 新版歌词页不再改变窗口全屏状态，收起时保持窗口原样
+    // （旧的 setFullscreen(false) 会把用户手动最大化的窗口打回普通尺寸）
+    if (!windowRestorePromiseRef.current) {
+      windowRestorePromiseRef.current = Promise.resolve(true);
     }
-
-    let restoreResult: boolean | void | Promise<boolean> | undefined;
-    let restoreFailed = false;
-    try {
-      restoreResult = window.musicPlayer?.window.setFullscreen?.(false);
-    } catch {
-      restoreFailed = true;
-    }
-
-    const restorePromise = restoreFailed
-      ? Promise.resolve(false)
-      : Promise.resolve(restoreResult).then(
-        (fullscreenState) => fullscreenState !== true,
-        () => false
-      );
-    const settledRestorePromise = restorePromise.then((restored) => {
-      if (!restored) {
-        windowRestorePromiseRef.current = null;
-      }
-      return restored;
-    });
-    windowRestorePromiseRef.current = settledRestorePromise;
-    return settledRestorePromise;
+    return windowRestorePromiseRef.current;
   }
 
   function showLyricsChrome() {
@@ -2014,15 +1927,6 @@ export function LyricsPanel({
 
     window.clearTimeout(idleDepthStartTimeoutRef.current);
     idleDepthStartTimeoutRef.current = 0;
-  }
-
-  function clearTranslationUnavailableTimer() {
-    if (!translationUnavailableTimeoutRef.current) {
-      return;
-    }
-
-    window.clearTimeout(translationUnavailableTimeoutRef.current);
-    translationUnavailableTimeoutRef.current = 0;
   }
 
   function triggerLyricsBoundaryBounce(direction: Exclude<LyricsBoundaryBounce, 'none'>) {
