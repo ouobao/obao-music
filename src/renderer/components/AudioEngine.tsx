@@ -3,6 +3,12 @@ import { usePlayerStore } from '../state/playerStore';
 
 const SOURCE_STUCK_TIMEOUT_MS = 6000;
 const WATCHDOG_INTERVAL_MS = 1000;
+/** 频繁拖动进度条时，seek 的节流间隔（避免高频 currentTime 赋值压垮媒体管线） */
+const SEEK_THROTTLE_MS = 120;
+/** seek 挂起判定阈值：seeking 状态持续超过该时长 → 重建元素 */
+const SEEK_STUCK_TIMEOUT_MS = 4000;
+/** "假播放"饿死判定阈值：元素未暂停但 currentTime 停滞超过该时长 → 重建元素 */
+const PLAYBACK_STALL_TIMEOUT_MS = 8000;
 
 /**
  * 音频引擎：负责把 store 中的播放状态落到 <audio> 元素上。
@@ -28,19 +34,28 @@ export function AudioEngine() {
     const audio = audioRef.current;
     if (!audio) return;
 
+    // 注册到 store 供歌词 rAF 时钟直接采样 currentTime（元素重建时旧 cleanup 先跑、新 effect 后跑）
+    usePlayerStore.setState({ mediaElement: audio });
+
     audio.volume = usePlayerStore.getState().volume / 100;
 
     // 媒体代次：每次“装载新源 / 停止”都 +1，比 URL 引用更可靠地识别过期事件
     let mediaGeneration = 0;
     let sourceAppliedAt = 0;
+    let seekThrottleTimerId = 0;
+    let scheduledSeekTargetMs = -1;
+    let seekingStartedAtMs = 0;
 
     const tryPlay = (generation: number) => {
       const state = usePlayerStore.getState();
       if (!state.isPlaying || !state.currentPlaybackUrl) return;
       const playPromise = audio.play();
       if (!playPromise) return;
-      // 加载被下一次切歌打断（AbortError）或自动播放被拒，忽略
-      playPromise.catch(() => {});
+      // 加载被下一次切歌打断（AbortError）属正常；其他拒绝（如管线异常）记录便于诊断
+      playPromise.catch((error: unknown) => {
+        if ((error as DOMException)?.name === 'AbortError') return;
+        console.warn('[audio] play() 被拒绝:', (error as DOMException)?.name, error);
+      });
     };
 
     const loadSourceOnFreshElement = (url: string) => {
@@ -87,21 +102,81 @@ export function AudioEngine() {
     });
 
     const unsubscribeSeek = usePlayerStore.subscribe((state, prev) => {
-      if (state.playbackSeekRevision !== prev.playbackSeekRevision) {
-        const target = state.playbackPositionMs / 1000;
-        if (Math.abs(audio.currentTime - target) > 0.5) {
-          audio.currentTime = target;
+      if (state.playbackSeekRevision === prev.playbackSeekRevision) return;
+      const target = state.playbackPositionMs / 1000;
+      if (!Number.isFinite(target) || target < 0) return;
+      if (Math.abs(audio.currentTime - target) < 0.3) return;
+      scheduledSeekTargetMs = target * 1000;
+      // 节流：高频拖动进度条时合并为每 SEEK_THROTTLE_MS 一次实际 seek，
+      // 避免连续 currentTime 赋值压垮 Chromium 媒体管线（管线 seek 队列爆炸死锁）
+      if (seekThrottleTimerId) return;
+      seekThrottleTimerId = window.setTimeout(() => {
+        seekThrottleTimerId = 0;
+        // 元数据未就绪时不丢弃 seek：保留 pending 目标，canplay 后应用，
+        // 避免"加载中拖动进度条 → 位置被 timeupdate 刷回 0"
+        if (audio.readyState < 1) return;
+        const nextTarget = scheduledSeekTargetMs / 1000;
+        scheduledSeekTargetMs = -1;
+        try {
+          if (Math.abs(audio.currentTime - nextTarget) >= 0.3) {
+            audio.currentTime = nextTarget;
+          }
+        } catch {
+          // ignore: 元素已在重建/卸载中
         }
-      }
+      }, SEEK_THROTTLE_MS);
     });
 
+    // canplay 后应用挂起的 seek（媒体管线就绪后一次性落到目标位置）
+    const applyPendingSeek = () => {
+      if (scheduledSeekTargetMs < 0 || audio.readyState < 1) return;
+      const nextTarget = scheduledSeekTargetMs / 1000;
+      scheduledSeekTargetMs = -1;
+      try {
+        if (Math.abs(audio.currentTime - nextTarget) >= 0.3) {
+          audio.currentTime = nextTarget;
+        }
+      } catch {
+        // ignore: 元素已在重建/卸载中
+      }
+    };
+
+    // seek 挂起检测：seeking 状态持续过久（媒体管线死锁）→ 重建元素自愈
+    const handleSeeking = () => {
+      seekingStartedAtMs = Date.now();
+    };
+    const handleSeeked = () => {
+      seekingStartedAtMs = 0;
+    };
+
+    audio.addEventListener('seeking', handleSeeking);
+    audio.addEventListener('seeked', handleSeeked);
+
+    // 最近一次 currentTime 前进的时刻：用于检测"假播放"（元素未暂停但数据饿死）
+    let lastProgressAtMs = 0;
+    let lastProgressPositionSec = -1;
+
     const handleTimeUpdate = () => {
-      const positionMs = audio.currentTime * 1000;
+      const positionSec = audio.currentTime;
+      if (positionSec !== lastProgressPositionSec) {
+        lastProgressPositionSec = positionSec;
+        lastProgressAtMs = Date.now();
+      }
+      const positionMs = positionSec * 1000;
       usePlayerStore.getState().setPlaybackProgress(positionMs, audio.duration ? audio.duration * 1000 : undefined);
     };
 
     const handleEnded = () => {
-      usePlayerStore.getState().handlePlaybackEnded();
+      const state = usePlayerStore.getState();
+      state.handlePlaybackEnded();
+      // 单曲循环：ended 后元素处于暂停态，仅 seek(0) 不会恢复播放。
+      // 若 store 仍在播放状态且未切歌（单曲循环保留原播放 URL），直接在本元素
+      // 重新起播（play() 对 ended 元素会从开头重放），替代原先依赖看门狗
+      // 1~6s 后重建元素"误打误撞"续命的方式（每次循环伴随静音与元素重建）
+      const next = usePlayerStore.getState();
+      if (next.isPlaying && next.currentPlaybackUrl && next.currentPlaybackUrl === state.currentPlaybackUrl) {
+        tryPlay(mediaGeneration);
+      }
     };
 
     const handleError = () => {
@@ -123,6 +198,7 @@ export function AudioEngine() {
     };
 
     const handleCanPlay = () => {
+      applyPendingSeek();
       const state = usePlayerStore.getState();
       if (state.isPlaying && state.currentPlaybackUrl && audio.paused) {
         tryPlay(mediaGeneration);
@@ -150,7 +226,23 @@ export function AudioEngine() {
       const current = usePlayerStore.getState();
       if (!current.isPlaying || !current.currentPlaybackUrl) return;
       if (audio.error) return;
-      if (!audio.paused) return;
+      // seek 挂起：seeking 状态持续过久说明媒体管线死锁（频繁拖动进度条的已知缺陷），
+      // 此时 audio.paused 可能为 false，原看门狗条件覆盖不到 → 单独检测并重建
+      if (seekingStartedAtMs !== 0 && Date.now() - seekingStartedAtMs > SEEK_STUCK_TIMEOUT_MS) {
+        setElementKey((key) => key + 1);
+        return;
+      }
+      if (!audio.paused) {
+        // "假播放"饿死：元素未暂停但 currentTime 长时间无前进（数据流饿死，
+        // readyState 停留在 HAVE_METADATA/HAVE_CURRENT_DATA）→ 原条件
+        // `if (!audio.paused) return` 会让这类元素永远绕过重建，表现为
+        // UI 转圈、进度冻结但永不自愈 → 重建元素
+        const anchorMs = lastProgressAtMs || sourceAppliedAt;
+        if (audio.readyState < 3 && Date.now() - anchorMs > PLAYBACK_STALL_TIMEOUT_MS) {
+          setElementKey((key) => key + 1);
+        }
+        return;
+      }
       if (Date.now() - sourceAppliedAt < SOURCE_STUCK_TIMEOUT_MS) return;
       setElementKey((key) => key + 1);
     }, WATCHDOG_INTERVAL_MS);
@@ -162,8 +254,10 @@ export function AudioEngine() {
     }
 
     return () => {
+      usePlayerStore.setState({ mediaElement: null });
       mediaGeneration += 1;
       window.clearInterval(watchdogId);
+      if (seekThrottleTimerId) window.clearTimeout(seekThrottleTimerId);
       unsubscribeUrl();
       unsubscribePlaying();
       unsubscribeVolume();
@@ -174,6 +268,18 @@ export function AudioEngine() {
       audio.removeEventListener('stalled', handleStalled);
       audio.removeEventListener('canplay', handleCanPlay);
       audio.removeEventListener('play', handlePlay);
+      audio.removeEventListener('seeking', handleSeeking);
+      audio.removeEventListener('seeked', handleSeeked);
+      // 旧元素退场前显式停掉并断开源：React 提交新 DOM 与执行 cleanup 之间存在
+      // 窗口，期间旧元素的 canplay 订阅仍可能触发发声（幽灵双声）；同时让
+      // musicplayer-audio:// 协议请求被取消，主进程随之中止对应的上游流
+      try {
+        audio.pause();
+        audio.removeAttribute('src');
+        audio.load();
+      } catch {
+        // ignore
+      }
     };
   }, [elementKey]);
 

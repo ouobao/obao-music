@@ -294,7 +294,7 @@ function HistoryDailySection() {
           <div
             key={date}
             className={`pill-item ${activeDate === date ? 'active' : ''}`}
-            style={activeDate === date ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 600 } : undefined}
+            style={activeDate === date ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
             onClick={() => loadSongs('netease', date)}
           >
             {formatDateLabel(date)}

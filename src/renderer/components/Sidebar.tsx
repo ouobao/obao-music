@@ -32,6 +32,21 @@ export function Sidebar({ collapsed = false, onToggleCollapsed }: { collapsed?: 
     }
   }, [activeProviderId, loadProviderPlaylists]);
 
+  // 手机端操作歌单后切回桌面应用：窗口重新可见时强制刷新歌单列表
+  useEffect(() => {
+    const refreshOnVisible = () => {
+      if (activeProviderId !== 'local' && document.visibilityState === 'visible') {
+        void loadProviderPlaylists(activeProviderId, { force: true });
+      }
+    };
+    document.addEventListener('visibilitychange', refreshOnVisible);
+    window.addEventListener('focus', refreshOnVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', refreshOnVisible);
+      window.removeEventListener('focus', refreshOnVisible);
+    };
+  }, [activeProviderId, loadProviderPlaylists]);
+
   const playlists = providerPlaylists[activeProviderId] ?? [];
   const likedPlaylists = playlists.filter((p) => p.ownership === 'liked' || p.isLiked);
   const createdPlaylists = playlists.filter((p) => p.ownership === 'created' && !p.isLiked);

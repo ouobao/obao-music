@@ -260,8 +260,8 @@ export function createNeteaseProvider(
       return loadNeteasePlaylistDetail(runtime, cache, playlistId, options);
     },
 
-    async getSongUrl(song, quality) {
-      return getSongUrl(runtime, cache, song, quality);
+    async getSongUrl(song, quality, options = {}) {
+      return getSongUrl(runtime, cache, song, quality, options);
     },
 
     async getLyrics(song) {
@@ -1615,24 +1615,38 @@ interface NeteaseQrPollResponse {
 }
 
 async function createLoginQr(runtime: NeteaseRuntime): Promise<LoginQrSession> {
-  const response = await runtime.requestJson<NeteaseQrKeyResponse>({
-    partition: NETEASE_LOGIN_PARTITION,
-    url: NETEASE_QR_UNIKEY_URL,
-    method: 'POST',
-    form: { type: '1' },
-    crypto: 'weapi'
-  });
+  // 首次访问登录分区会话时（冷启动）session.fetch 偶发失败/挂起：
+  // 主进程侧自动重试，避免确定性首开失败（渲染层"切换 tab 才成功"的症状）。
+  // 预算控制在 ~25s 内（2 次 × 12s 网络超时 + 退避），与渲染层超时对齐
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+    }
+    try {
+      const response = await runtime.requestJson<NeteaseQrKeyResponse>({
+        partition: NETEASE_LOGIN_PARTITION,
+        url: NETEASE_QR_UNIKEY_URL,
+        method: 'POST',
+        form: { type: '1' },
+        crypto: 'weapi'
+      });
 
-  if (response.code !== 200 || !response.unikey) {
-    throw new Error(`网易云音乐二维码创建失败（${response.message || response.code || '未知错误'}）`);
+      if (response.code !== 200 || !response.unikey) {
+        throw new Error(`网易云音乐二维码创建失败（${response.message || response.code || '未知错误'}）`);
+      }
+
+      return {
+        providerId: 'netease',
+        key: response.unikey,
+        qrText: `${NETEASE_QR_SCAN_URL_PREFIX}${response.unikey}`,
+        expiresAtMs: Date.now() + NETEASE_QR_EXPIRES_IN_MS
+      };
+    } catch (error) {
+      lastError = error;
+    }
   }
-
-  return {
-    providerId: 'netease',
-    key: response.unikey,
-    qrText: `${NETEASE_QR_SCAN_URL_PREFIX}${response.unikey}`,
-    expiresAtMs: Date.now() + NETEASE_QR_EXPIRES_IN_MS
-  };
+  throw lastError instanceof Error ? lastError : new Error('网易云音乐二维码创建失败');
 }
 
 async function pollLoginQr(runtime: NeteaseRuntime, cache: CacheStore, key: string): Promise<LoginQrPollResult> {
@@ -1657,19 +1671,50 @@ async function pollLoginQr(runtime: NeteaseRuntime, cache: CacheStore, key: stri
       return {
         state: 'success',
         message: '登录成功',
-        loginStatus: await getLoginStatus(runtime, cache)
+        // userInfo 拉取失败（瞬时网络抖动）不能阻塞登录成功状态：
+        // 扫码已确认、cookie 已保存，先返回成功态；渲染层可后续刷新 profile
+        loginStatus: await safeGetLoginStatus(runtime, cache)
       };
     default:
+      // 非常规 code（风控/新状态码/未知码）视为等待态而非直接失败：
+      // 连续失败由渲染层计数，偶发异常码不打断扫码确认流程
       return {
-        state: 'failed',
-        message: `扫码登录失败（${response.message || response.code || '未知错误'}）`
+        state: 'waiting',
+        message: response.message ? `扫码验证中（${response.message || response.code}）` : '等待扫码'
       };
+  }
+}
+
+/** getLoginStatus 的容错版本：失败返回"已登录但 profile 待刷新"的兜底态 */
+async function safeGetLoginStatus(runtime: NeteaseRuntime, cache: CacheStore): Promise<LoginStatus> {
+  try {
+    const status = await getLoginStatus(runtime, cache);
+    if (status.loggedIn) {
+      return status;
+    }
+    // cookie 已保存但 profile 接口瞬时失败：兜底标记已登录，profile 后续刷新补齐
+    return {
+      ...status,
+      providerId: 'netease',
+      loggedIn: true,
+      playbackReady: true
+    };
+  } catch {
+    return {
+      providerId: 'netease',
+      loggedIn: true,
+      playbackReady: true,
+      nickname: undefined,
+      userId: undefined
+    };
   }
 }
 
 async function storeQrCookies(runtime: NeteaseRuntime, cookieHeader: string | undefined): Promise<void> {
   const cookies = parseNeteaseQrCookieHeader(cookieHeader);
-  if (!cookies.some((cookie) => cookie.name === 'MUSIC_U' && cookie.value)) {
+  // 网易云接口偶发 cookie 字段缺失/改名：只要还有可识别的 cookie 就尽力写入，
+  // 只有完全解析不到任何登录凭证时才抛错（避免"扫码成功但保存失败"卡死登录页）
+  if (cookies.length === 0) {
     throw new Error('网易云音乐登录响应中缺少登录凭证');
   }
 
@@ -1735,12 +1780,16 @@ async function getAccountProfile(runtime: NeteaseRuntime): Promise<NeteaseProfil
   return account.profile ?? null;
 }
 
-async function getSongUrl(runtime: NeteaseRuntime, cache: CacheStore, song: Song, quality: Quality): Promise<SongUrlResult> {
+async function getSongUrl(runtime: NeteaseRuntime, cache: CacheStore, song: Song, quality: Quality, options: ProviderFetchOptions = {}): Promise<SongUrlResult> {
   const platformSongId = song.platformSongId ?? parseProviderScopedId(song.id);
   const failureCacheKey = CACHE_KEYS.playbackFailure('netease', platformSongId, quality);
-  const cachedFailure = cache.get<SongUrlResult>(failureCacheKey);
-  if (cachedFailure) {
-    return cachedFailure;
+  // 用户显式重试（forceRefresh）时跳过失败缓存：30s 内点"重试"必须真正发起
+  // 网络请求，否则重试按钮永远返回缓存里的失败结果（账号已登录也放不出来）
+  if (!options.forceRefresh) {
+    const cachedFailure = cache.get<SongUrlResult>(failureCacheKey);
+    if (cachedFailure) {
+      return cachedFailure;
+    }
   }
 
   if (!(await hasNeteaseAuthCookie(runtime))) {

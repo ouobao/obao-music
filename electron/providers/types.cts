@@ -503,7 +503,7 @@ export interface MusicProvider {
   getUserPlaylists(options?: ProviderFetchOptions): Promise<Playlist[]>;
   getPlaylistTracks(playlistId: string, options?: ProviderFetchOptions): Promise<Song[]>;
   getPlaylistDetail?(playlistId: string, options?: ProviderFetchOptions): Promise<PlaylistDetail>;
-  getSongUrl(song: Song, quality: Quality): Promise<SongUrlResult>;
+  getSongUrl(song: Song, quality: Quality, options?: ProviderFetchOptions): Promise<SongUrlResult>;
   getLyrics(song: Song): Promise<LyricsResult>;
   setSongLiked(song: Song, liked: boolean): Promise<SongMutationResult>;
   addSongToPlaylist(song: Song, playlistId: string): Promise<SongMutationResult>;

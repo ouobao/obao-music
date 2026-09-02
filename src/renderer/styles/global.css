@@ -50,6 +50,45 @@
   will-change: clip-path;
 }
 
+/* 逐字描光模式：容器不裁剪（每个字符 span 自持渐变），光柱改由字符色彩承接 */
+.lyric-line-text-fill[data-char-fill] {
+  clip-path: none;
+  will-change: auto;
+  text-shadow: none;
+}
+
+.lyric-line-text-fill[data-char-fill]::after {
+  display: none;
+}
+
+.lyric-char-fill {
+  display: inline;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    var(--accent-primary) 0%,
+    var(--accent-primary) var(--lyric-char-progress, 0%),
+    rgba(0, 0, 0, 0) var(--lyric-char-progress, 0%),
+    rgba(0, 0, 0, 0) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* 已唱完的字符：纯色 + 静止微光（不参与每帧渐变，零绘制成本） */
+.lyric-char-fill.filled {
+  background-image: none;
+  color: var(--accent-primary);
+  -webkit-text-fill-color: var(--accent-primary);
+  text-shadow: 0 0 0.12em color-mix(in srgb, var(--accent-primary) 30%, transparent);
+}
+
+/* 正在渐变中的字符：不加 text-shadow，避免 background-clip 下阴影照亮未唱区域 */
+.lyric-char-fill.filling {
+  text-shadow: none;
+}
+
 .lyric-line.active .lyric-line-text-fill::after {
   content: '';
   position: absolute;
@@ -75,6 +114,18 @@
 
 [data-reduce-effects='true'] .lyric-line.active .lyric-line-text-fill::after {
   display: none;
+}
+
+/* 减弱动效：逐字描光降级为两态切换（跳过逐字渐变） */
+[data-reduce-effects='true'] .lyric-char-fill:not(.filled) {
+  background-image: none;
+  color: var(--accent-primary);
+  -webkit-text-fill-color: var(--accent-primary);
+  opacity: 0;
+}
+
+[data-reduce-effects='true'] .lyric-char-fill.filled {
+  opacity: 1;
 }
 
 
@@ -142,7 +193,7 @@
 
 .empty-state-title {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
 }
 
@@ -228,7 +279,7 @@
 
 .playback-restriction-title {
   color: var(--text-primary);
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
 }
 
 .playback-restriction-banner strong.playback-restriction-title {
@@ -320,7 +371,7 @@
   transform: translateX(-50%);
   color: var(--lyrics-text-hover);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   pointer-events: none;
   user-select: none;
 }
@@ -340,7 +391,7 @@
   max-width: 100%;
   font-size: clamp(20px, 1.9vw, 28px);
   line-height: 1.3;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   color: var(--text-primary);
   overflow-wrap: anywhere;
   user-select: none;
@@ -392,7 +443,9 @@
   user-select: none;
 }
 
-/* 歌词页底部播放栏：复用 .playerbar 结构，仅覆盖定位与显隐 */
+/* 歌词页底部播放栏：复用 .playerbar 结构，仅覆盖定位与显隐。
+   额外中和播放条的常驻底色/上边框/毛玻璃，改为贴合歌词页的柔和渐变纱罩，
+   避免在歌词页底部形成一条突兀的色块横带 */
 .lyrics-player-bar {
   position: fixed;
   right: 0;
@@ -400,10 +453,28 @@
   left: 0;
   grid-area: auto;
   z-index: 8;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--lyrics-overlay-bg-solid) 60%, transparent),
+    transparent
+  );
+  border-top: 0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   opacity: 0;
   transform: translate3d(0, 42px, 0);
   pointer-events: none;
   transition: opacity 320ms var(--ease-desktop-out), transform 420ms var(--ease-desktop-out);
+}
+
+/* 歌词页内音质徽章去描边去底色，与幽灵化的传输按钮一致 */
+.lyrics-player-bar .quality-badge-btn {
+  border-color: transparent;
+  background: transparent;
+}
+
+.lyrics-player-bar .quality-badge-btn:hover {
+  background: var(--bg-active);
 }
 
 .lyrics-overlay[data-transition-phase='interactive'] .lyrics-player-bar {
@@ -436,10 +507,12 @@
   background: rgb(0 0 0 / 46%);
 }
 
-/* 队列抽屉遮罩去掉全屏 backdrop-filter：打开过渡期间每帧全屏重采样是首开卡顿的主因 */
+/* 队列抽屉遮罩：恢复背景模糊（opacity 淡入承载视觉过渡，backdrop-filter 恒定不参与
+   逐帧过渡，避免打开期间每帧全屏重采样；blur 值从 28px 降到 14px 进一步降低采样成本） */
 .drawer-overlay {
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  will-change: opacity;
 }
 
 /* 减弱动效：歌词行只保留颜色切换，不做模糊/位移过渡 */

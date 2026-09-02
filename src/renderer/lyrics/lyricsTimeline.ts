@@ -111,6 +111,30 @@ export function getLyricLineProgress(
   return clampProgress((targetMs - activeLine.startMs) / (safeEndMs - activeLine.startMs));
 }
 
+/**
+ * 行内第 charIndex 个字符的开始时间。时间窗口与 getLyricLineProgress 完全一致：
+ * 行内字符时长均分 (下一个行 start 或 duration - 当前行 start)。
+ */
+export function getLyricCharStartMs(
+  lines: LyricLine[],
+  activeIndex: number,
+  charIndex: number,
+  charCount: number,
+  durationMs = 0
+): number {
+  const activeLine = lines[activeIndex];
+
+  if (!activeLine || charCount <= 0) {
+    return activeLine?.startMs ?? 0;
+  }
+
+  const nextLineStartMs = lines[activeIndex + 1]?.startMs;
+  const endMs = nextLineStartMs ?? durationMs;
+  const safeEndMs = endMs > activeLine.startMs ? endMs : activeLine.startMs + 4000;
+
+  return activeLine.startMs + ((safeEndMs - activeLine.startMs) * charIndex) / charCount;
+}
+
 function toMilliseconds(minutes: string, seconds: string, fraction = '0'): number | null {
   const minuteValue = Number(minutes);
   const secondValue = Number(seconds);

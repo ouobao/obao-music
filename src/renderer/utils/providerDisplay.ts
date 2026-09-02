@@ -1,8 +1,8 @@
 import type { ProviderId, RemoteProviderId } from '../../shared/musicTypes';
 
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
-  netease: '网易云',
-  qq: 'QQ 音乐',
+  netease: '网易云音乐',
+  qq: 'QQ音乐',
   local: '本地音乐'
 };
 

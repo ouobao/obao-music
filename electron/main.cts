@@ -1077,8 +1077,8 @@ function registerMusicProviderHandlers(providerRegistry: ProviderRegistry, audio
     };
   });
 
-  ipcMain.handle('music:get-song-url', async (_event, providerId, song, quality) => {
-    const result = await providerRegistry.run(providerId, (provider) => provider.getSongUrl(song, quality));
+  ipcMain.handle('music:get-song-url', async (_event, providerId, song, quality, options) => {
+    const result = await providerRegistry.run(providerId, (provider) => provider.getSongUrl(song, quality, options));
     if (!result.ok || !result.data.ok || !result.data.url) {
       return result;
     }
@@ -1170,6 +1170,38 @@ function registerAudioSourceProtocol(audioSourceRegistry: AudioSourceRegistry) {
 }
 
 const AUDIO_FETCH_HEADER_TIMEOUT_MS = 20_000;
+/** 每个分区 session 的在飞音频流上限：超出时中止最旧的流。
+ *  频繁切歌会在活跃流上反复打断，若取消传播失效，挂死的上游流会累积占满
+ *  CDN 连接池，之后所有加载全部饿死（表现为"必须重启才能播放"）。
+ *  该上限是确定性兜底：无论取消传播是否可靠，在飞数都有界。 */
+const AUDIO_FETCH_MAX_INFLIGHT_PER_SESSION = 4;
+
+const audioFetchInflightBySession = new Map<ProviderId, Set<AbortController>>();
+
+function registerAudioFetchInflight(providerId: ProviderId, controller: AbortController): void {
+  let controllers = audioFetchInflightBySession.get(providerId);
+  if (!controllers) {
+    controllers = new Set();
+    audioFetchInflightBySession.set(providerId, controllers);
+  }
+  // Set 迭代按插入序：第一个即最旧的流
+  while (controllers.size >= AUDIO_FETCH_MAX_INFLIGHT_PER_SESSION) {
+    const oldest = controllers.values().next().value;
+    if (!oldest) break;
+    controllers.delete(oldest);
+    console.info('[AudioProxy] 在飞上限，中止最旧的上游流', { providerId });
+    try {
+      oldest.abort();
+    } catch {
+      // ignore
+    }
+  }
+  controllers.add(controller);
+}
+
+function unregisterAudioFetchInflight(providerId: ProviderId, controller: AbortController): void {
+  audioFetchInflightBySession.get(providerId)?.delete(controller);
+}
 
 async function createRemoteAudioResponse(source: RegisteredAudioSource, request: Request): Promise<Response> {
   const sourceSession = getAudioSourceSession(source.providerId);
@@ -1179,6 +1211,23 @@ async function createRemoteAudioResponse(source: RegisteredAudioSource, request:
   // 只在“等待响应头”阶段超时；拿到响应头后立刻取消超时，流式播放不受影响。
   const controller = new AbortController();
   const headerTimeoutId = setTimeout(() => controller.abort(), AUDIO_FETCH_HEADER_TIMEOUT_MS);
+  // 渲染层取消传播：<audio> 元素被切歌/重建移除时 protocol 请求被取消，
+  // 显式中止上游 fetch，不再遗留半死的上游流占住分区 session 的连接
+  const onRendererAbort = () => {
+    if (!controller.signal.aborted) {
+      console.info('[AudioProxy] 渲染层取消，中止上游流', { providerId: source.providerId });
+      controller.abort();
+    }
+  };
+  request.signal.addEventListener('abort', onRendererAbort);
+  registerAudioFetchInflight(source.providerId, controller);
+  // 生命周期释放：在飞注册与取消监听要活到响应体流结束（而非仅响应头返回），
+  // 由下方 pull 式包装流在流结束/出错/被取消时调用
+  const releaseFetch = () => {
+    request.signal.removeEventListener('abort', onRendererAbort);
+    unregisterAudioFetchInflight(source.providerId, controller);
+  };
+
   let response: Response;
   try {
     response = await sourceSession.fetch(source.url, {
@@ -1188,11 +1237,18 @@ async function createRemoteAudioResponse(source: RegisteredAudioSource, request:
       redirect: 'follow',
       signal: controller.signal
     });
-  } finally {
+  } catch (error) {
     clearTimeout(headerTimeoutId);
+    releaseFetch();
+    if (controller.signal.aborted) {
+      console.info('[AudioProxy] 上游流已中止', { providerId: source.providerId });
+    }
+    throw error;
   }
+  clearTimeout(headerTimeoutId);
 
   if (!response.ok && response.status !== 206) {
+    releaseFetch();
     return new Response('Audio source unavailable', { status: response.status || 502 });
   }
 
@@ -1206,11 +1262,43 @@ async function createRemoteAudioResponse(source: RegisteredAudioSource, request:
     });
   }
 
-  return new Response(response.body, {
+  const responseInit = {
     status: response.status,
     statusText: response.statusText,
     headers: normalizeAudioResponseHeaders(response.headers, source.url)
+  };
+  const upstreamBody = response.body;
+  if (!upstreamBody) {
+    releaseFetch();
+    return new Response(null, responseInit);
+  }
+
+  // pull 式包装流：按媒体元素的真实消费速度逐块读取（保持背压，不整首缓冲进内存），
+  // 并借此获得流的完整生命周期：结束/出错/被取消时释放监听与在飞注册；
+  // 渲染层停止读取（元素移除/seek 重开请求）时同步 cancel 上游
+  const upstreamReader = upstreamBody.getReader();
+  const trackedBody = new ReadableStream<Uint8Array>({
+    async pull(pullController) {
+      try {
+        const { done, value } = await upstreamReader.read();
+        if (done) {
+          pullController.close();
+          releaseFetch();
+          return;
+        }
+        pullController.enqueue(value);
+      } catch (error) {
+        pullController.error(error);
+        releaseFetch();
+      }
+    },
+    cancel(reason) {
+      releaseFetch();
+      void upstreamReader.cancel(reason).catch(() => {});
+    }
   });
+
+  return new Response(trackedBody, responseInit);
 }
 
 function normalizeAudioResponseHeaders(headers: Headers, sourceUrl: string): Headers {
@@ -1353,6 +1441,17 @@ if (!hasSingleInstanceLock) {
     registerQqCoverImageCorsPolicy(session.defaultSession);
     createMainWindow();
     createTray();
+
+    // 预热登录分区：网易云/QQ 的登录分区 session 为懒创建，首次 fetch 偶发挂起
+    // （登录弹窗二维码首开报错的根因之一）。启动时静默各查询一次登录状态，
+    // 把分区会话的创建挪到用户打开登录弹窗之前。
+    for (const providerId of ['netease', 'qq'] as const) {
+      void providerRegistry.run(providerId, (provider) => provider.getLoginStatus()).then((result) => {
+        if (!result.ok) {
+          diagnostics.log('login-partition-warmup-failed', { providerId });
+        }
+      });
+    }
 
     app.on('activate', () => {
       diagnostics.log('app-activate');

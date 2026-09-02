@@ -51,11 +51,33 @@ export function PlaybackCoreControls() {
   const playbackPositionMs = usePlayerStore((s) => s.playbackPositionMs);
   const playbackDurationMs = usePlayerStore((s) => s.playbackDurationMs);
   const seekPlayback = usePlayerStore((s) => s.seekPlayback);
+  const volume = usePlayerStore((s) => s.volume);
+  const setVolume = usePlayerStore((s) => s.setVolume);
 
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const modeTriggerRef = useRef<HTMLButtonElement>(null);
+  const [volumeMenuOpen, setVolumeMenuOpen] = useState(false);
+  const volumeTriggerRef = useRef<HTMLButtonElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const [progressDragging, setProgressDragging] = useState(false);
+  const [lastNonNullVolume, setLastNonNullVolume] = useState(() =>
+    usePlayerStore.getState().volume > 0 ? usePlayerStore.getState().volume : 58
+  );
+
+  const logicIndex = volume === 0 ? 0 : volume <= 50 ? 1 : 2;
+  const volumeIcon =
+    logicIndex === 0 ? <VolumeMutedIcon size={15} strokeWidth={2} /> :
+    logicIndex === 1 ? <VolumeLowIcon size={15} strokeWidth={2} /> :
+    <VolumeHighIcon size={15} strokeWidth={2} />;
+
+  const toggleMute = () => {
+    if (volume === 0) {
+      setVolume(lastNonNullVolume);
+    } else {
+      setLastNonNullVolume(volume);
+      setVolume(0);
+    }
+  };
 
   const progress = playbackDurationMs > 0 ? (playbackPositionMs / playbackDurationMs) * 100 : 0;
 
@@ -106,6 +128,52 @@ export function PlaybackCoreControls() {
         <button className="control-btn" title="下一首" onClick={playNext}>
           <SkipForwardIcon size={16} strokeWidth={2} filled />
         </button>
+
+        {/* 音量调节：按钮式弹出面板（与左侧播放顺序、右侧音质的交互逻辑一致） */}
+        <button
+          ref={volumeTriggerRef}
+          className="control-btn"
+          title="音量"
+          aria-label="音量"
+          aria-haspopup="dialog"
+          aria-expanded={volumeMenuOpen}
+          onClick={() => setVolumeMenuOpen((open) => !open)}
+        >
+          {volumeIcon}
+        </button>
+        <PopoverMenu
+          open={volumeMenuOpen}
+          onClose={() => setVolumeMenuOpen(false)}
+          triggerRef={volumeTriggerRef}
+          position="top"
+          align="center"
+          className="popover-menu--volume"
+          ariaLabel="音量调节"
+        >
+          <div className="volume-popover">
+            <input
+              type="range"
+              className="volume-slider"
+              min={0}
+              max={100}
+              step={1}
+              value={volume}
+              aria-label="音量"
+              aria-valuetext={`音量 ${volume}%`}
+              onChange={(e) => setVolume(Number(e.target.value))}
+              style={{ '--vol': `${volume}%` } as React.CSSProperties}
+            />
+            <span className="volume-percent-label">{volume}%</span>
+            <button
+              className="volume-popover-mute"
+              type="button"
+              title={volume === 0 ? '取消静音' : '静音'}
+              onClick={toggleMute}
+            >
+              {volumeIcon}
+            </button>
+          </div>
+        </PopoverMenu>
       </div>
 
       <div className="progress-bar-container">
@@ -147,31 +215,12 @@ export function PlaybackExtras({ onOpenSimilar, onQueue, hideSimilar = false }: 
   const currentSong = usePlayerStore((s) => s.currentSong);
   const playbackQuality = usePlayerStore((s) => s.playbackQuality);
   const setPlaybackQuality = usePlayerStore((s) => s.setPlaybackQuality);
-  const volume = usePlayerStore((s) => s.volume);
-  const setVolume = usePlayerStore((s) => s.setVolume);
   const toggleQueue = useUiStore((s) => s.toggleQueue);
 
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const qualityTriggerRef = useRef<HTMLButtonElement>(null);
-  const [lastNonNullVolume, setLastNonNullVolume] = useState(() =>
-    usePlayerStore.getState().volume > 0 ? usePlayerStore.getState().volume : 58
-  );
 
   const showSimilar = Boolean(currentSong) && currentSong?.providerId === 'netease';
-
-  const toggleMute = () => {
-    if (volume === 0) {
-      setVolume(lastNonNullVolume);
-    } else {
-      setLastNonNullVolume(volume);
-      setVolume(0);
-    }
-  };
-
-  const volumeIcon =
-    volume === 0 ? <VolumeMutedIcon size={15} strokeWidth={2} /> :
-    volume < 50 ? <VolumeLowIcon size={15} strokeWidth={2} /> :
-    <VolumeHighIcon size={15} strokeWidth={2} />;
 
   const qualityItems = Object.entries(QUALITY_LABELS).map(([quality, label]) => ({
     key: quality,
@@ -219,33 +268,6 @@ export function PlaybackExtras({ onOpenSimilar, onQueue, hideSimilar = false }: 
       <button className="control-btn" title="播放队列" aria-label="播放队列" onClick={handleQueue}>
         <QueueIcon size={17} strokeWidth={2} />
       </button>
-
-      <div className="volume-control-wrapper" style={{ display: 'flex', alignItems: 'center', gap: 6, width: 'auto' }}>
-        <button
-          className="control-btn"
-          style={{ width: 24, height: 24 }}
-          title={volume === 0 ? '取消静音' : '静音'}
-          aria-label={volume === 0 ? '取消静音' : '静音'}
-          onClick={toggleMute}
-        >
-          {volumeIcon}
-        </button>
-        <input
-          type="range"
-          className="volume-slider"
-          min={0}
-          max={100}
-          step={1}
-          value={volume}
-          aria-label="音量"
-          aria-valuetext={`音量 ${volume}%`}
-          onChange={(e) => setVolume(Number(e.target.value))}
-          style={{ '--vol': `${volume}%` } as React.CSSProperties}
-        />
-        <span className="volume-percent-label" style={{ fontSize: 11, fontVariantNumeric: 'tabular-nums', color: 'var(--text-tertiary)', minWidth: 28, textAlign: 'left' }}>
-          {volume}%
-        </span>
-      </div>
     </>
   );
 }

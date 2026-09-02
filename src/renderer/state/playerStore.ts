@@ -16,6 +16,8 @@ const LYRIC_OFFSET_PREFIX = 'musicplayer.lyric-offset:';
 export interface PlayerState {
   queue: QueueItem[];
   queueSongs: Record<string, Song>;
+  /** 队列整表替换计数：仅 playSongsFromList 递增，供虚拟列表滚动复位判定 */
+  queueEpoch: number;
   currentQueueItemId: string | null;
   currentSong: Song | null;
   currentPlaybackUrl: string | null;
@@ -31,6 +33,8 @@ export interface PlayerState {
   isPlaying: boolean;
   isLyricsOpen: boolean;
   failedQueueItemIds: string[];
+  /** 当前 <audio> 元素引用（非持久化，供歌词 rAF 时钟直接采样 currentTime） */
+  mediaElement: HTMLAudioElement | null;
 
   playSongsFromList(songs: Song[], startIndex: number, sourceContext?: SourceContextLike): void;
   playSongFromList(song: Song, sourceContext?: SourceContextLike): void;
@@ -178,7 +182,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
 
   const persist = () => saveSession(get());
 
-  const resolvePlaybackUrl = (song: Song) => {
+  /** 连续自动跳歌失败计数：成功起播清零；≥3 次熔断停止自动跳歌 */
+  let consecutiveAutoSkipFailures = 0;
+
+  const resolvePlaybackUrl = (song: Song, options?: { forceRefresh?: boolean }) => {
     const requestedQuality = get().playbackQuality;
     const requestedSongKey = songKey(song);
     const requestRevision = ++playbackRequestRevision;
@@ -192,11 +199,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
 
     set({ playbackStatus: 'loading', playbackRestriction: null, currentPlaybackUrl: null, isPlaying: false });
     window.musicPlayer.music
-      .getSongUrl(song.providerId, song, requestedQuality)
+      .getSongUrl(song.providerId, song, requestedQuality, options)
       .then((result) => {
         if (!isCurrentRequest()) return;
         if (result.ok) {
           if (result.data.ok && result.data.url) {
+            consecutiveAutoSkipFailures = 0;
             set({ currentPlaybackUrl: result.data.url, playbackStatus: 'ready', isPlaying: true });
           } else {
             set({
@@ -248,6 +256,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
   return {
     queue: restored.queue ?? [],
     queueSongs: restored.queueSongs ?? {},
+    queueEpoch: 0,
     currentQueueItemId: restored.currentQueueItemId ?? null,
     currentSong: null,
     currentPlaybackUrl: null,
@@ -263,6 +272,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
     isPlaying: false,
     isLyricsOpen: false,
     failedQueueItemIds: [],
+    mediaElement: null,
 
     playSongsFromList(songs, startIndex, sourceContext) {
       if (songs.length === 0) return;
@@ -270,7 +280,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
       const queueItems: QueueItem[] = songs.map((song) => queueItemForSong(song, 'playlist', sourceContext));
       const queueSongs: Record<string, Song> = {};
       for (const song of songs) queueSongs[songKey(song)] = song;
-      set({ queue: queueItems.slice(0, QUEUE_LIMIT), queueSongs, failedQueueItemIds: [] });
+      set({
+        queue: queueItems.slice(0, QUEUE_LIMIT),
+        queueSongs,
+        failedQueueItemIds: [],
+        queueEpoch: get().queueEpoch + 1
+      });
       playQueueItemAt(start);
     },
 
@@ -465,6 +480,29 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
       const { queue, currentQueueItemId, failedQueueItemIds, currentSong } = get();
       if (currentSong && expectedUrl && expectedUrl !== get().currentPlaybackUrl) return;
 
+      // 连败熔断：环境性故障（网络断开/连接池坏死等）下，无退避的自动跳歌会把
+      // 整个队列逐个标记失败、烧穿全库，用户视角即"无论怎么点都无法播放"。
+      // 连续 3 次失败即停止自动跳歌，置为错误态交还用户决定（成功起播后清零）。
+      consecutiveAutoSkipFailures += 1;
+      if (consecutiveAutoSkipFailures >= 3) {
+        consecutiveAutoSkipFailures = 0;
+        const failedWithCurrent = currentQueueItemId
+          ? [...failedQueueItemIds, currentQueueItemId]
+          : [...failedQueueItemIds];
+        set({
+          playbackStatus: 'error',
+          isPlaying: false,
+          currentPlaybackUrl: null,
+          failedQueueItemIds: failedWithCurrent.slice(-40),
+          playbackRestriction: {
+            category: 'url_unavailable',
+            message: message || '连续多首播放失败，已停止自动切歌',
+            action: 'retry'
+          }
+        });
+        return;
+      }
+
       const currentIndex = queue.findIndex((q) => q.id === currentQueueItemId);
       const failed = [...failedQueueItemIds];
       if (currentQueueItemId) failed.push(currentQueueItemId);
@@ -496,7 +534,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => {
       const song = get().currentSong;
       if (song) {
         set({ playbackRestriction: null, failedQueueItemIds: [] });
-        resolvePlaybackUrl(song);
+        // forceRefresh：跳过主进程的播放失败缓存，确保重试真正发起网络请求
+        resolvePlaybackUrl(song, { forceRefresh: true });
       }
     },
 

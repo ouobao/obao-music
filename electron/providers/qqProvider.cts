@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import type { BrowserWindow, BrowserWindowConstructorOptions, Session } from 'electron';
-import { createProviderRequestError, createProviderTimeoutError } from './providerErrors.cjs';
+import { createProviderBodyReadError, createProviderRequestError, createProviderTimeoutError } from './providerErrors.cjs';
 import type {
   AlbumDetail,
   AlbumReference,
@@ -260,8 +260,8 @@ export function createQQProvider(
       return loadQQPlaylistDetail(runtime, cache, playlistId, options);
     },
 
-    async getSongUrl(song, quality) {
-      return getSongUrl(runtime, cache, song, quality);
+    async getSongUrl(song, quality, options = {}) {
+      return getSongUrl(runtime, cache, song, quality, options);
     },
 
     async getLyrics(song) {
@@ -1492,6 +1492,24 @@ interface QQQrLoginTextResult {
 }
 
 async function createQQLoginQr(runtime: QQRuntime): Promise<QQQrSession> {
+  // 首次访问登录分区会话时（冷启动）session.fetch 偶发失败/挂起：
+  // 主进程侧自动重试，避免确定性首开失败（渲染层"切换 tab 才成功"的症状）。
+  // 预算控制在 ~25s 内（2 次尝试 + 退避），与渲染层超时对齐
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+    }
+    try {
+      return await createQQLoginQrOnce(runtime);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('QQ 音乐二维码创建失败');
+}
+
+async function createQQLoginQrOnce(runtime: QQRuntime): Promise<QQQrSession> {
   const xloginUrl = createQQXLoginUrl();
   await runtime.requestText({
     partition: QQ_LOGIN_PARTITION,
@@ -1971,12 +1989,16 @@ async function getQQPlaybackIdentity(runtime: QQRuntime): Promise<QQPlaybackIden
   };
 }
 
-async function getSongUrl(runtime: QQRuntime, cache: CacheStore, song: Song, quality: Quality): Promise<SongUrlResult> {
+async function getSongUrl(runtime: QQRuntime, cache: CacheStore, song: Song, quality: Quality, options: ProviderFetchOptions = {}): Promise<SongUrlResult> {
   const platformSongId = song.platformSongId ?? parseProviderScopedId(song.id);
   const failureCacheKey = CACHE_KEYS.playbackFailure('qq', platformSongId, quality);
-  const cachedFailure = cache.get<SongUrlResult>(failureCacheKey);
-  if (cachedFailure) {
-    return cachedFailure;
+  // 用户显式重试（forceRefresh）时跳过失败缓存：30s 内点"重试"必须真正发起
+  // 网络请求，否则重试按钮永远返回缓存里的失败结果（账号已登录也放不出来）
+  if (!options.forceRefresh) {
+    const cachedFailure = cache.get<SongUrlResult>(failureCacheKey);
+    if (cachedFailure) {
+      return cachedFailure;
+    }
   }
 
   const identity = await getQQPlaybackIdentity(runtime);
@@ -2566,7 +2588,13 @@ function createElectronQQRuntime(): QQRuntime {
         throw createProviderRequestError('QQ 音乐', response.status);
       }
 
-      return response.text();
+      try {
+        return await response.text();
+      } catch (error) {
+        // Electron session.fetch 的 Response 偶发 body 克隆错误（DataCloneError），
+        // 转成明确的 ProviderRequestError，避免把原生 clone 错误透传给 UI
+        throw createProviderBodyReadError('QQ 音乐', error);
+      }
     },
 
     async requestBuffer({ partition, url, headers }) {
@@ -2578,7 +2606,13 @@ function createElectronQQRuntime(): QQRuntime {
         throw createProviderRequestError('QQ 音乐', response.status);
       }
 
-      return Buffer.from(await response.arrayBuffer());
+      try {
+        return Buffer.from(await response.arrayBuffer());
+      } catch (error) {
+        // Electron session.fetch 的 Response 偶发 body 克隆错误（DataCloneError），
+        // 转成明确的 ProviderRequestError，避免把原生 clone 错误透传给 UI
+        throw createProviderBodyReadError('QQ 音乐', error);
+      }
     },
 
     async clearSession(partition) {

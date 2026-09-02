@@ -79,7 +79,6 @@
 img.media-cover-img,
 img.song-row-cover,
 img.detail-hero-cover,
-img.queue-song-cover,
 img.lyrics-big-cover,
 img.playlist-nav-cover,
 img.user-avatar {
@@ -89,6 +88,27 @@ img.user-avatar {
   transition: opacity 450ms var(--ease-desktop-out),
               filter 450ms var(--ease-desktop-out),
               transform 450ms var(--ease-desktop-out);
+}
+
+/* 队列封面：去掉 blur 过渡（首开时 10-25 张图同时 blur 滤镜过渡是卡顿主因），纯 opacity+scale 淡入 */
+img.queue-song-cover {
+  opacity: 0;
+  transform: scale(0.98);
+  transition: opacity 300ms var(--ease-desktop-out),
+              transform 300ms var(--ease-desktop-out);
+}
+
+/* 队列首开（未打开过、无缓存可预热时）：跳过淡入过渡，加载完成即直接显示。
+   ⚠️ 必须同时覆盖 opacity/transform，否则默认 opacity:0 会让封面永久空白 */
+img.queue-song-cover.no-reveal {
+  transition: none;
+  opacity: 1;
+  transform: none;
+}
+
+img.queue-song-cover.no-reveal.img-loaded {
+  opacity: 1;
+  transform: none;
 }
 
 img.img-loaded {
@@ -219,7 +239,7 @@ img.img-loaded {
   background: var(--accent-primary);
   color: #fff;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   padding: 3px 9px;
   border-radius: var(--radius-xs);
   z-index: 1;
@@ -230,7 +250,7 @@ img.img-loaded {
   position: relative;
   z-index: 1;
   font-size: 18px;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   color: #fff;
   letter-spacing: 0;
 }
@@ -257,7 +277,7 @@ img.img-loaded {
 
 .section-main-title {
   font-size: 21px;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: 0;
 }
 
@@ -393,7 +413,7 @@ img.img-loaded {
   backdrop-filter: blur(8px);
   color: #fff;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   padding: 3px 8px;
   border-radius: var(--radius-pill);
   display: flex;
@@ -403,7 +423,7 @@ img.img-loaded {
 
 .media-title {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   line-height: 1.45;
   color: var(--text-primary);
   display: -webkit-box;
@@ -432,7 +452,7 @@ img.img-loaded {
   grid-template-columns: 48px 1.4fr 1fr 1fr 70px 68px;
   padding: 8px 16px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-light);
   margin-bottom: 6px;
@@ -459,7 +479,7 @@ img.img-loaded {
 .song-row.playing {
   background: var(--bg-active);
   color: var(--accent-primary);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .song-index-col {
@@ -643,7 +663,7 @@ img.img-loaded {
 
 .detail-hero-title {
   font-size: 26px;
-  font-weight: 800;
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.5px;
   line-height: 1.25;
   text-align: left;
@@ -762,7 +782,7 @@ img.img-loaded {
   padding: 10px 24px;
   background: var(--btn-solid-bg);
   color: var(--btn-solid-text);
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   font-size: 14px;
   border-radius: var(--radius-pill);
   box-shadow: var(--shadow-sm);
@@ -781,7 +801,7 @@ img.img-loaded {
   background: var(--bg-card);
   border: 1px solid var(--border-light);
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   font-size: 13px;
   border-radius: var(--radius-pill);
   transition: background var(--duration-micro), border-color var(--duration-micro);
@@ -862,7 +882,7 @@ img.img-loaded {
 
 .artist-name {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
 }
 
@@ -946,8 +966,16 @@ img.img-loaded {
 
 .search-load-more {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
   padding: 8px 0 24px;
+}
+
+.search-load-more .song-table,
+.search-load-more .media-grid {
+  width: 100%;
+  margin-bottom: 0;
 }
 
 @media (max-width: 760px) {
@@ -1026,7 +1054,7 @@ img.img-loaded {
 
 .smart-radio-title {
   font-size: 17px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   margin-bottom: 4px;
 }
@@ -1045,7 +1073,7 @@ img.img-loaded {
   background: var(--accent-primary);
   color: #fff;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   border: none;
   cursor: pointer;
   transition: background var(--duration-micro), transform var(--duration-micro);
@@ -1087,7 +1115,7 @@ img.img-loaded {
 
 .hot-search-rank {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   min-width: 20px;
@@ -1101,7 +1129,7 @@ img.img-loaded {
 .hot-search-keyword {
   font-size: 13px;
   color: var(--text-primary);
-  font-weight: 500;
+  font-weight: var(--font-weight-regular);
   white-space: nowrap;
   max-width: 140px;
   overflow: hidden;
@@ -1110,7 +1138,7 @@ img.img-loaded {
 
 .hot-search-badge {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: #fff;
   background: var(--accent-primary);
   padding: 1px 6px;
@@ -1208,7 +1236,7 @@ div.chart-preview-img {
 
 .chart-preview-name {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;

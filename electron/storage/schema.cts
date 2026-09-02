@@ -20,9 +20,10 @@ export interface CacheStore {
 
 export const CACHE_TTL_MS = {
   loginStatus: 60_000,
-  providerPlaylists: 5 * 60_000,
-  playlistTracks: 5 * 60_000,
-  playlistDetail: 5 * 60_000,
+  // 歌单相关数据 TTL 缩短到 1 分钟：手机端增删歌单歌曲后，切回桌面端 1 分钟内自动拿到最新列表
+  providerPlaylists: 60_000,
+  playlistTracks: 60_000,
+  playlistDetail: 60_000,
   chartList: 10 * 60_000,
   chartTracks: 5 * 60_000,
   playlistCategories: 30 * 60_000,

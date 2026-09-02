@@ -1,55 +1,83 @@
-# 欧包音乐（Obao Music）
+# Obao Music
 
-Obao Music：基于 Electron、React 与 Vite 构建的桌面音乐播放器。
+A feature-rich desktop music player for Windows, built with **Electron 33 + React 18 + TypeScript**.
+Stream and organize music from NetEase Cloud Music, QQ Music, and local files — with lossless-quality playback, karaoke-style lyrics, and a fully custom UI.
 
-## 环境要求
+| | |
+|---|---|
+| ![Player](images/1.png) | ![Lyrics](images/2.png) |
 
-- Windows 10/11
-- Node.js 20+（建议 LTS）
-- npm（随 Node 安装）
+## Features
 
-## 首次启动
+**Multi-source streaming**
 
-在仓库根目录进入应用目录并安装依赖：
+- Three providers behind one unified interface: NetEase Cloud Music, QQ Music, and local files
+- Unified search across songs, artists, albums, and playlists, plus charts and playlist discovery
+- Daily recommendations, recommendation history, and similar-song suggestions (NetEase)
+- QR-code or account login; like songs and manage your playlists in-app
+
+**Playback**
+
+- Quality tiers from standard up to lossless
+- Karaoke-style scrolling lyrics with translation support
+- Playback restrictions (VIP / copyright / region) surfaced as clear, actionable messages
+- Exclusive-mode audio output, tray playback controls, and Windows media-key integration
+
+**Desktop experience**
+
+- Custom frameless window with its own navigation stack (no router library)
+- 3D ambient background rendered with Three.js; GSAP-driven motion across the UI
+- Light / dark themes, queue panel, similar-songs panel, toasts, and skeleton loading states
+
+## Tech Stack
+
+| Layer | Tech |
+|---|---|
+| Shell | Electron 33 (main process in TypeScript) |
+| UI | React 18 + Vite 5 + TypeScript |
+| State | Zustand 5 |
+| Motion | GSAP + @gsap/react |
+| 3D | Three.js |
+| IPC | Typed contract over contextBridge — no HTTP layer |
+| Audio | Custom `musicplayer-audio://` protocol with a main-process proxy and expiring handles |
+
+## Architecture Highlights
+
+- **Typed IPC contract** — every `window.musicPlayer.*` call returns a discriminated result (`{ok:true,data} | {ok:false,error}`); the full interface is specified in [docs/FEATURES.md](docs/FEATURES.md)
+- **Provider abstraction** — NetEase / QQ / local sources implement one provider interface with a capability matrix, so the UI degrades gracefully per platform
+- **Secure media pipeline** — audio URLs are resolved by the main process and exposed to the renderer only through a custom protocol with time-limited handles
+- **Structured playback errors** — restrictions map to typed categories (`login_required`, `vip_required`, `copyright_unavailable`, …) with a suggested action for each
+
+## Getting Started
+
+Requirements: Windows 10/11, Node.js 20+ (LTS recommended).
 
 ```bat
-cd electron-music-player
+git clone <repo-url>
+cd MusicPlayer
 npm install
-```
-
-然后任选一种方式启动：
-
-### 方式 A：双击启动脚本（推荐）
-
-在 `electron-music-player` 目录双击：
-
-- `启动播放器.cmd` — 启动开发模式
-- `关闭播放器.cmd` — 停止相关进程
-
-### 方式 B：命令行
-
-```bat
-cd electron-music-player
 npm run dev
 ```
 
-或使用 PowerShell 封装（与 `.cmd` 相同）：
-
-```bat
-npm run dev:start
-npm run dev:stop
-```
-
-## 说明
-
-- 开发模式会先编译 Electron 主进程（`build:electron`），再启动 Vite（`http://127.0.0.1:5173`）与 Electron 窗口。
-- 构建产物在 `dist` / `dist-electron`，已忽略，无需提交。
-- 运行日志默认写在 `logs/`（本地生成，已忽略）。
-
-## 可选
-
-注册 Windows 应用身份（媒体控件等）：
+Optional — register the Windows app identity (enables system media controls / SMTC):
 
 ```bat
 npm run windows:register-identity
 ```
+
+### Build & Package
+
+```bat
+npm run build              # typecheck + production build
+npm run dist:win           # NSIS installer (x64)
+npm run dist:win:portable  # portable executable
+```
+
+## Documentation
+
+- [docs/FEATURES.md](docs/FEATURES.md) — complete feature specification and IPC contract
+- [docs/COMPREHENSIVE_UI_MOTION_ANALYSIS.md](docs/COMPREHENSIVE_UI_MOTION_ANALYSIS.md) — UI motion design analysis
+
+## License
+
+[MIT](LICENSE)

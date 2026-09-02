@@ -83,7 +83,20 @@ export function SearchResultsView({ keyword }: SearchResultsViewProps) {
     : [];
 
   const hasMoreEntities = Boolean(entityResults && Object.values(entityResults.sections).some((section) => section.available && section.hasMore));
-  const canLoadMore = hasMoreSongs || hasMoreEntities;
+  const activeEntityHasMore =
+    activeResultView === 'artist'
+      ? Boolean(artistSection && artistSection.available && artistSection.hasMore)
+      : activeResultView === 'album'
+        ? Boolean(albumSection && albumSection.available && albumSection.hasMore)
+        : activeResultView === 'playlist'
+          ? Boolean(playlistSection && playlistSection.available && playlistSection.hasMore)
+          : false;
+  const canLoadMore =
+    activeResultView === 'song'
+      ? hasMoreSongs
+      : activeResultView === 'artist' || activeResultView === 'album' || activeResultView === 'playlist'
+        ? activeEntityHasMore
+        : hasMoreSongs || hasMoreEntities;
   const totalVisible = songs.length + artistCards.length + albumCards.length + playlistCards.length;
 
   return (
@@ -100,7 +113,7 @@ export function SearchResultsView({ keyword }: SearchResultsViewProps) {
           <button
             key={tab.key}
             className={`pill-item ${activeResultView === tab.key ? 'active' : ''}`}
-            style={activeResultView === tab.key ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 600 } : undefined}
+            style={activeResultView === tab.key ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
             onClick={() => setActiveResultView(tab.key)}
           >
             {tab.label}
@@ -185,7 +198,13 @@ export function SearchResultsView({ keyword }: SearchResultsViewProps) {
           <button className="section-action-btn" disabled={isLoadingMore} onClick={loadMore}>
             {isLoadingMore ? '加载中...' : '加载更多'}
           </button>
-          {isLoadingMore && <SkeletonSongRow rows={3} />}
+          {isLoadingMore && (
+            activeResultView === 'artist' || activeResultView === 'album' || activeResultView === 'playlist' ? (
+              <SkeletonCardGrid count={6} />
+            ) : (
+              <SkeletonSongRow rows={3} />
+            )
+          )}
         </div>
       )}
       </div>

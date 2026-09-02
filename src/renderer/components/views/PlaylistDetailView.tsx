@@ -98,6 +98,22 @@ function usePlaylistDetail(providerId: RemoteProviderId, playlistId: string) {
     load(providerId, playlistId);
   }, [providerId, playlistId, load, seed]);
 
+  // 手机端操作歌单后切回桌面应用：窗口重新可见时强制刷新歌单详情，
+  // 保证本地展示与云端一致（配合主进程 1 分钟缓存 TTL，非焦点切换也能在 1 分钟内更新）
+  useEffect(() => {
+    const refreshOnVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void load(providerId, playlistId, { force: true });
+      }
+    };
+    document.addEventListener('visibilitychange', refreshOnVisible);
+    window.addEventListener('focus', refreshOnVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', refreshOnVisible);
+      window.removeEventListener('focus', refreshOnVisible);
+    };
+  }, [providerId, playlistId, load]);
+
   // 把详情曲目同步进 libraryStore：这样“从歌单移除/添加到歌单/取消喜欢”等
   // mutation 更新 playlistTracks 后，详情页能立即响应，无需切走再刷新
   useEffect(() => {
@@ -281,14 +297,14 @@ function ArtistDetail({ providerId, artistId }: { providerId: RemoteProviderId; 
       <div className="filter-pills-bar" style={{ marginTop: 24 }}>
         <div
           className={`pill-item ${activeTab === 'songs' ? 'active' : ''}`}
-          style={activeTab === 'songs' ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 600 } : undefined}
+          style={activeTab === 'songs' ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
           onClick={() => setActiveTab('songs')}
         >
           热门单曲{detail.songCount != null ? ` (${detail.songCount})` : ''}
         </div>
         <div
           className={`pill-item ${activeTab === 'albums' ? 'active' : ''}`}
-          style={activeTab === 'albums' ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 600 } : undefined}
+          style={activeTab === 'albums' ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
           onClick={() => setActiveTab('albums')}
         >
           所有专辑

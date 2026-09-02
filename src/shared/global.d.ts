@@ -126,7 +126,7 @@ declare global {
         refillRadioSession: (session: RadioSession) => Promise<ProviderIpcResult<RadioSessionPage>>;
         skipRadioSessionItem: (session: RadioSession, item: RadioSessionItem) => Promise<ProviderIpcResult<RadioSessionPage>>;
         submitRadioNegativeFeedback: (session: RadioSession, item: RadioSessionItem) => Promise<ProviderIpcResult<RadioSessionPage>>;
-        getSongUrl: (providerId: ProviderId, song: Song, quality: Quality) => Promise<ProviderIpcResult<SongUrlResult>>;
+        getSongUrl: (providerId: ProviderId, song: Song, quality: Quality, options?: { forceRefresh?: boolean }) => Promise<ProviderIpcResult<SongUrlResult>>;
         getLyrics: (providerId: ProviderId, song: Song) => Promise<ProviderIpcResult<LyricsResult>>;
         setSongLiked: (providerId: ProviderId, song: Song, liked: boolean) => Promise<ProviderIpcResult<SongMutationResult>>;
         addSongToPlaylist: (providerId: ProviderId, song: Song, playlistId: string) => Promise<ProviderIpcResult<SongMutationResult>>;

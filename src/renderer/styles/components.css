@@ -151,7 +151,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-weight: 800;
+  font-weight: var(--font-weight-bold);
   font-size: 17px;
   letter-spacing: 1.5px;
   color: var(--text-primary);
@@ -162,7 +162,7 @@
 .sidebar-brand-text {
   font-family: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei", "Microsoft YaHei UI", sans-serif;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 1px;
   color: var(--text-primary);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
@@ -193,7 +193,7 @@
   display: flex;
   align-items: center;
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   color: var(--text-muted);
   padding: 10px 8px 4px 8px;
@@ -217,7 +217,7 @@
   border-radius: var(--radius-md);
   color: var(--text-secondary);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--font-weight-regular);
   transition: background-color var(--duration-micro) ease, color var(--duration-micro) ease;
   text-decoration: none;
   position: relative;
@@ -248,7 +248,7 @@
 .nav-item.active {
   background: var(--bg-active);
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .nav-item.active::before {
@@ -317,7 +317,7 @@
 .playlist-nav-item.active {
   background: var(--bg-active);
   color: var(--text-primary);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .playlist-nav-cover {
@@ -383,7 +383,7 @@
 /* 侧边栏歌单子分组：网易云“我创建的 / 我收藏的”分隔标题 */
 .sidebar-playlist-subtitle {
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.3px;
   color: var(--text-tertiary);
   padding: 9px 8px 3px 8px;
@@ -531,7 +531,7 @@
 
 .dropdown-section-title {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-muted);
   margin-bottom: 8px;
   letter-spacing: 0.4px;
@@ -601,7 +601,7 @@
   position: relative;
   padding: 4px 12px;
   font-size: 11.5px;
-  font-weight: 500;
+  font-weight: var(--font-weight-regular);
   border-radius: var(--radius-pill);
   color: var(--text-secondary);
   transition: color 220ms var(--ease-desktop-out), background 220ms var(--ease-desktop-out);
@@ -613,7 +613,7 @@
 
 .provider-btn.active {
   color: var(--btn-solid-text);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 [data-theme='light'] .provider-toggle-thumb {
@@ -732,7 +732,7 @@
   justify-content: center;
   color: #fff;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
 }
 
 .user-name {
@@ -741,7 +741,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--font-weight-regular);
   color: var(--text-secondary);
   line-height: 1;
 }
@@ -841,7 +841,7 @@
   justify-content: center;
   box-shadow: var(--shadow-md);
   cursor: pointer;
-  z-index: 30;
+  z-index: var(--z-float-btn);
   opacity: 0;
   pointer-events: none;
   transform: translateY(10px) scale(0.9);
@@ -882,7 +882,7 @@
   justify-content: center;
   box-shadow: var(--shadow-md);
   cursor: pointer;
-  z-index: 30;
+  z-index: var(--z-float-btn);
   opacity: 0;
   pointer-events: none;
   transform: translateY(10px) scale(0.9);
@@ -1023,7 +1023,7 @@
 
 .song-title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -1147,7 +1147,7 @@
   border: 1px solid var(--border-light);
   border-radius: var(--radius-xs);
   font-size: 10.5px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: var(--accent-primary);
   background: var(--bg-card);
 }
@@ -1164,17 +1164,21 @@
   --vol: 50%;
   -webkit-appearance: none;
   appearance: none;
-  width: 80px;
-  height: 4px;
+  /* 纵向滑块：vertical-lr 转竖向，direction: rtl 让最大值在顶部（常规音量条方向） */
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 18px;
+  height: 96px;
   border-radius: var(--radius-pill);
   outline: none;
   cursor: pointer;
+  /* 填充自下而上；渐变只画在中央 4px 的视觉轨道上，元素整体加宽作点击热区 */
   background: linear-gradient(
-    to right,
+    to top,
     var(--accent-primary) 0%,
     var(--accent-primary) var(--vol),
     var(--bg-card-hover) var(--vol)
-  );
+  ) center / 4px 100% no-repeat;
   transition: --vol 180ms var(--ease-desktop-out);
 }
 
@@ -1191,7 +1195,38 @@
 }
 
 .volume-slider:focus-visible {
-  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* 音量弹出面板（按钮式触发，纵向布局：百分比 → 滑块 → 静音） */
+.volume-popover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px 10px;
+}
+
+.volume-percent-label {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.volume-popover-mute {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: background var(--duration-micro), color var(--duration-micro);
+}
+
+.volume-popover-mute:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
 }
 
 .drawer-overlay {
@@ -1200,7 +1235,7 @@
   background: rgba(0, 0, 0, 0.35);
   backdrop-filter: var(--blur-overlay);
   -webkit-backdrop-filter: var(--blur-overlay);
-  z-index: 14;
+  z-index: var(--z-drawer-overlay);
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
@@ -1230,20 +1265,23 @@
   width: 360px;
   bottom: 88px;
   background: var(--bg-panel);
-  backdrop-filter: var(--blur-strong);
-  -webkit-backdrop-filter: var(--blur-strong);
+  /* 面板 blur 降到 10px：原 blur(40px) 在打开过渡期间每帧全面板重采样，是首开卡顿主因 */
+  backdrop-filter: blur(10px) saturate(150%);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-drawer);
   box-shadow: var(--shadow-float);
-  z-index: 15;
-  transition: right var(--duration-normal) var(--ease-desktop-out), transform var(--duration-normal) var(--ease-desktop-out);
+  z-index: var(--z-drawer);
+  transition: right var(--duration-normal) var(--ease-desktop-out), transform var(--duration-normal) var(--ease-desktop-out), visibility var(--duration-normal);
   display: flex;
   flex-direction: column;
   padding: 18px;
+  visibility: hidden;
 }
 
 .drawer-panel.open {
   right: 16px;
+  visibility: visible;
 }
 
 .drawer-header {
@@ -1257,7 +1295,7 @@
 
 .drawer-title {
   font-size: 14.5px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
 }
 
@@ -1265,9 +1303,25 @@
 .queue-song-list {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* 虚拟滚动：外层 spacer 撑起总高，行绝对定位 */
+.queue-song-list.queued-list-virtual {
+  gap: 0;
+  position: relative;
+}
+
+.queued-list-spacer {
+  position: relative;
+  width: 100%;
+  /* 绝不能被 flex 收缩：其子行全是绝对定位，min-content 高度为 0，
+     一旦被 shrink 就撑不起 N*行高 的总高，scrollHeight 会随虚拟窗口位置自扩展
+     （表现为滚动条越滚越短、拖动时抽搐） */
+  flex: none;
 }
 
 .queue-song-item {
@@ -1276,12 +1330,31 @@
   gap: 10px;
   padding: 8px 10px;
   border-radius: var(--radius-md);
-  transition: background var(--duration-micro) var(--ease-desktop-out), transform var(--duration-micro) var(--ease-desktop-out);
+  /* 只过渡背景色：虚拟行的定位走 translate 属性，绝不能进 transition，
+     否则滚动跨桶时行会带着 180ms 平滑追赶真实偏移，表现为滚动条抽搐 */
+  transition: background var(--duration-micro) var(--ease-desktop-out);
   cursor: pointer;
+}
+
+/* 面板打开时：队列条目从上到下依次模糊淡入（与歌曲列表一致的进入动画） */
+.queue-song-list.queued-entry-anim .queue-song-item {
+  animation: itemBlurIn 340ms var(--ease-desktop-out) backwards;
+  animation-delay: calc(var(--i, 0) * 28ms);
+}
+
+/* 虚拟滚动行：用独立 translate 属性定位（与 hover 的 transform 可叠加，互不干扰） */
+.queue-song-item.virtual {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  translate: 0 var(--queued-item-y, 0px);
 }
 
 .queue-song-item:hover {
   background: var(--bg-card-hover);
+  /* hover 左移走 transform：transform 与 translate 是独立属性，
+     不参与定位也不在 transition 列表里，瞬时生效且不影响虚拟行偏移 */
   transform: translateX(-2px);
 }
 
@@ -1303,7 +1376,7 @@
 
 .queue-song-title {
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -1570,8 +1643,9 @@
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  background: var(--bg-glass-strong);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  /* 幽灵形态：无常驻底色与描边，融入歌词页背景，仅 hover/active 给轻反馈 */
+  background: transparent;
+  border: 1px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1582,7 +1656,6 @@
 .lyrics-header-btn:hover:not(:disabled) {
   background: var(--bg-active);
   color: var(--lyrics-text-active);
-  border-color: rgba(255, 255, 255, 0.24);
 }
 
 .lyrics-header-btn:disabled {
@@ -1593,24 +1666,11 @@
 .lyrics-header-close:hover:not(:disabled) {
   background: rgba(244, 63, 94, 0.28);
   color: #fff;
-  border-color: rgba(244, 63, 94, 0.5);
-}
-
-[data-theme='light'] .lyrics-header-btn {
-  background: rgba(0, 0, 0, 0.05);
-  border-color: rgba(0, 0, 0, 0.12);
-  color: var(--lyrics-text-hover);
-}
-
-[data-theme='light'] .lyrics-header-btn:hover:not(:disabled) {
-  background: rgba(0, 0, 0, 0.1);
-  color: var(--lyrics-text-active);
 }
 
 .lyrics-header-btn.active {
   background: var(--bg-active);
   color: var(--lyrics-text-active);
-  border-color: rgba(255, 255, 255, 0.24);
 }
 
 /* 歌词工具：平铺面板弹层（译文 / 偏移 / 字号 三段直排） */
@@ -1639,7 +1699,7 @@
 
 .lyrics-panel-section-label {
   font-size: 10px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-tertiary);
@@ -1665,7 +1725,7 @@
   height: 24px;
   border-radius: var(--radius-pill);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-secondary);
   transition: background var(--duration-micro), color var(--duration-micro);
 }
@@ -1777,6 +1837,10 @@
   border-radius: var(--radius-xl);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-light);
   object-fit: cover;
+  /* 封面载体：--song-cover-image 由组件注入（url(...)），--cover-tone 兜底渐变 */
+  background: var(--song-cover-image), var(--cover-tone);
+  background-position: center;
+  background-size: cover;
 }
 
 /* 切歌过渡：骨架占位 + 内容淡入 */
@@ -1904,7 +1968,8 @@
   padding: 200px 0 240px 0;
   /* 不透明度/缩放即可完成边缘羽化的视觉；不使用 mask-image，
      避免软渲染下 mask+blur 组合层造成 GPU/合成器崩溃 */
-  scroll-behavior: smooth;
+  /* 注意：不能设 scroll-behavior: smooth——rAF 逐帧写 scrollTop 会被其
+     拦截成平滑动画，产生滚动滞后/粘滞（行切换滚动不跟手主因） */
 }
 
 .lyrics-scroll-container::-webkit-scrollbar {
@@ -1919,11 +1984,12 @@
 .lyric-line {
   position: relative;
   font-size: calc(24px * var(--lyrics-scale, 1));
-  font-weight: 600;
+  font-weight: var(--font-weight-regular);
   color: var(--lyrics-text-inactive);
   padding: 16px 24px;
-  /* 注意：filter 不参与过渡动画（软渲染下逐帧 blur 极易卡死/崩溃），模糊仅静态生效 */
-  transition: transform 0.4s var(--ease-desktop-out), opacity 0.4s var(--ease-desktop-out), color 0.4s var(--ease-desktop-out);
+  /* 注意：filter 不参与过渡动画（软渲染下逐帧 blur 极易卡死/崩溃），模糊仅静态生效；
+     font-size 参与过渡：行切换 24→34px 平滑变化，避免行高骤变导致的内容跳动 */
+  transition: transform 0.4s var(--ease-desktop-out), opacity 0.4s var(--ease-desktop-out), color 0.4s var(--ease-desktop-out), font-size 0.4s var(--ease-desktop-out);
   cursor: pointer;
   white-space: normal;
   word-break: break-word;
@@ -1975,14 +2041,14 @@
 .lyrics-translation-text {
   display: block;
   font-size: 16px;
-  font-weight: 400;
+  font-weight: var(--font-weight-regular);
   color: var(--lyrics-trans-inactive);
   margin-top: 6px;
 }
 
 .lyric-line.active .lyrics-translation-text {
   color: var(--lyrics-trans-active);
-  font-weight: 500;
+  font-weight: var(--font-weight-regular);
 }
 
 /* 逐字字符：默认未唱状态，用 CSS 变量 --lyric-char-fill 控制渐变填充 */
@@ -2047,7 +2113,7 @@
 /* 🎯 当前精准高亮激活行与逐字/逐句时间帧描光 */
 .lyric-line.active {
   font-size: calc(34px * var(--lyrics-scale, 1));
-  font-weight: 800;
+  font-weight: var(--font-weight-bold);
   opacity: 1;
   transform: scale(1.03) translateX(12px);
   color: var(--lyrics-text-active);
@@ -2078,14 +2144,14 @@
 
 .lyric-translation {
   font-size: 16px;
-  font-weight: 400;
+  font-weight: var(--font-weight-regular);
   color: var(--lyrics-trans-inactive);
   margin-top: 6px;
 }
 
 .lyric-line.active .lyric-translation {
   color: var(--lyrics-trans-active);
-  font-weight: 500;
+  font-weight: var(--font-weight-regular);
 }
 
 /* 歌词页完整播放底栏 */
@@ -2140,7 +2206,8 @@
     padding: 10px 14px;
   }
 
-  .lyrics-playerbar-right .volume-control-wrapper {
+  /* 小屏歌词页播放栏：隐藏音量滑块（保留静音按钮），避免与进度条挤压 */
+  .lyrics-playerbar .volume-slider {
     display: none;
   }
 }
@@ -2259,6 +2326,13 @@
   animation: popoverMount 200ms var(--ease-desktop-out) forwards;
 }
 
+/* 音量面板：children 自定义内容模式，宽度按内容收缩
+   （覆盖为文字菜单项设计的 76~104px 宽度区间） */
+.popover-menu--volume {
+  min-width: 0;
+  max-width: none;
+}
+
 @keyframes popoverMount {
   from {
     opacity: 0;
@@ -2292,7 +2366,7 @@
   padding: 6px 10px;
   border-radius: var(--radius-sm);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--font-weight-regular);
   line-height: 1.3;
   color: var(--text-secondary);
   text-align: left;
@@ -2308,7 +2382,7 @@
 .popover-menu-item.active {
   background: var(--bg-active);
   color: var(--accent-primary);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 .popover-menu-item:focus-visible {
@@ -2393,7 +2467,7 @@
   top: 0;
   left: calc(100% + 6px);
   width: max-content;
-  min-width: 168px;
+  min-width: 0;
   max-width: min(320px, calc(100vw - 32px));
   max-height: min(320px, calc(100vh - 16px));
   overflow-y: auto;
@@ -2432,7 +2506,7 @@
 
 .all-categories-group-title {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
   color: var(--text-tertiary);
   padding: 2px 4px;
   letter-spacing: 0.3px;
@@ -2467,7 +2541,7 @@
   background: var(--accent-gradient);
   color: #fff;
   border-color: transparent;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
 
 /* Toast 通知 */
@@ -2487,7 +2561,7 @@
   border: 1px solid var(--toast-border);
   box-shadow: var(--toast-shadow);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--font-weight-regular);
   transform: translate(-50%, -8px);
   opacity: 0;
   pointer-events: none;
@@ -2522,7 +2596,7 @@
   background: var(--btn-solid-bg);
   color: var(--btn-solid-text);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--font-weight-semibold);
 }
 
 .toast-close {

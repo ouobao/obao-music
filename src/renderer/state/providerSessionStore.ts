@@ -14,6 +14,8 @@ export interface ProviderSessionState {
 
   hydrateStatuses(): Promise<void>;
   refreshStatus(providerId: ProviderId): Promise<void>;
+  /** 扫码登录成功时直接写入 poll 返回的 loginStatus（不依赖后续 refreshStatus 网络请求） */
+  setStatus(providerId: ProviderId, status: LoginStatus): void;
   setDefaultProvider(providerId: ProviderId): void;
   setActiveProvider(providerId: ProviderId): void;
   login(providerId: ProviderId): Promise<void>;
@@ -50,6 +52,10 @@ export const useProviderSessionStore = create<ProviderSessionState>((set, get) =
     if (result.ok) {
       set((state) => ({ statuses: { ...state.statuses, [providerId]: result.data } }));
     }
+  },
+
+  setStatus(providerId, status) {
+    set((state) => ({ statuses: { ...state.statuses, [providerId]: status } }));
   },
 
   setDefaultProvider(providerId) {

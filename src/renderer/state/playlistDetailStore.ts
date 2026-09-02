@@ -7,7 +7,7 @@ export interface PlaylistDetailState {
   statusByKey: Record<string, LoadStatus>;
   errorByKey: Record<string, string | null>;
 
-  load(providerId: ProviderId, playlistId: string): Promise<PlaylistDetail | null>;
+  load(providerId: ProviderId, playlistId: string, options?: { force?: boolean }): Promise<PlaylistDetail | null>;
   seed(providerId: ProviderId, playlistId: string, detail: PlaylistDetail): void;
   clear(providerId: ProviderId): void;
 }
@@ -32,10 +32,12 @@ export const usePlaylistDetailStore = create<PlaylistDetailState>((set, get) => 
   statusByKey: {},
   errorByKey: {},
 
-  async load(providerId, playlistId) {
+  async load(providerId, playlistId, options) {
     const key = `${providerId}:${playlistId}`;
     const current = get().statusByKey[key];
-    if (current === 'loading' || current === 'refreshing') return get().detailsByKey[key] ?? null;
+    // 非强制刷新时，加载中/刷新中的请求合并（避免并发重复拉取）；
+    // force（如应用从后台回到前台）时无视当前状态直接重新拉取
+    if (!options?.force && (current === 'loading' || current === 'refreshing')) return get().detailsByKey[key] ?? null;
     const revision = (revisionByKey[key] = (revisionByKey[key] ?? 0) + 1);
     const hasData = Boolean(get().detailsByKey[key]);
     set((state) => ({

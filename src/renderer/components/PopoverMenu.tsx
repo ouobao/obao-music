@@ -16,7 +16,10 @@ export interface PopoverMenuItem {
 interface PopoverMenuProps {
   open: boolean;
   onClose: () => void;
-  items: PopoverMenuItem[];
+  /** 菜单项；与 children 二选一（children 为自定义内容模式） */
+  items?: PopoverMenuItem[];
+  /** 自定义内容模式：传入 children 时替代 items 菜单渲染（如音量面板等自定义控件） */
+  children?: ReactNode;
   triggerRef?: React.RefObject<HTMLElement | null>;
   fixedPosition?: { x: number; y: number } | null;
   position?: 'top' | 'bottom';
@@ -31,7 +34,8 @@ interface PopoverMenuProps {
 export function PopoverMenu({
   open,
   onClose,
-  items,
+  items = [],
+  children,
   triggerRef,
   fixedPosition,
   position = 'top',
@@ -53,17 +57,19 @@ export function PopoverMenu({
       setOpenPath([]);
       return;
     }
-    const measure = () => {
+    // 同步实测：弹层元素已随本次 commit 挂载，layout effect 内即可取 offsetWidth/Height
+    // （布局尺寸，不受 popoverMount 缩放动画影响）——首帧即真实位置，避免按估计值落位后跳正
+    const measureSize = () => {
       const menu = menuRef.current;
-      if (!menu) return false;
-      const menuWidth = menu.offsetWidth;
-      const menuHeight = menu.offsetHeight;
-      if (menuWidth === 0 || menuHeight === 0) return false;
-      setMenuRect((prev) => {
-        if (prev && prev.width === menuWidth && prev.height === menuHeight) return prev;
-        return { ...(prev ?? { left: 0, top: 0 }), width: menuWidth, height: menuHeight };
-      });
-      return true;
+      if (!menu || menu.offsetWidth === 0 || menu.offsetHeight === 0) return null;
+      return { width: menu.offsetWidth, height: menu.offsetHeight };
+    };
+    const commitRect = (left: number, top: number, width: number, height: number) => {
+      setMenuRect((prev) =>
+        prev && prev.left === left && prev.top === top && prev.width === width && prev.height === height
+          ? prev
+          : { left, top, width, height }
+      );
     };
     if (fixedPosition) {
       const anchorX = fixedPosition.x;
@@ -83,17 +89,17 @@ export function PopoverMenu({
           const preferBelow = anchorY + menuHeight + 12 <= window.innerHeight - 8;
           return preferBelow ? clampTop(menuHeight, anchorY + 8) : clampTop(menuHeight, anchorY - menuHeight - 8);
         };
-        setMenuRect({ left: resolveLeft(estimatedWidth), top: resolveTop(estimatedHeight), width: estimatedWidth, height: estimatedHeight });
-        setOpensLeft(anchorX + 8 + estimatedWidth + 218 > window.innerWidth);
-        setOpensUp(anchorY + 8 + estimatedHeight + 12 > window.innerHeight - 8);
+        const apply = (menuWidth: number, menuHeight: number) => {
+          commitRect(resolveLeft(menuWidth), resolveTop(menuHeight), menuWidth, menuHeight);
+          setOpensLeft(anchorX + 8 + menuWidth + 218 > window.innerWidth);
+          setOpensUp(anchorY + 8 + menuHeight + 12 > window.innerHeight - 8);
+        };
+        apply(estimatedWidth, estimatedHeight);
+        const size = measureSize();
+        if (size) apply(size.width, size.height);
         requestAnimationFrame(() => {
-          if (!measure()) return;
-          const r = menuRef.current?.getBoundingClientRect();
-          if (r) {
-            setMenuRect({ left: resolveLeft(r.width), top: resolveTop(r.height), width: r.width, height: r.height });
-            setOpensLeft(anchorX + 8 + r.width + 218 > window.innerWidth);
-            setOpensUp(anchorY + 8 + r.height + 12 > window.innerHeight - 8);
-          }
+          const refined = measureSize();
+          if (refined) apply(refined.width, refined.height);
         });
       } else {
         const resolveLeft = (menuWidth: number) => {
@@ -103,58 +109,41 @@ export function PopoverMenu({
           else left = anchorX;
           return clampLeft(menuWidth, left);
         };
-        const resolveTop = (menuHeight: number) => clampTop(menuHeight, anchorY);
-        setMenuRect({
-          left: resolveLeft(estimatedWidth),
-          top: resolveTop(estimatedHeight),
-          width: estimatedWidth,
-          height: estimatedHeight
-        });
+        const apply = (menuWidth: number, menuHeight: number) => {
+          commitRect(resolveLeft(menuWidth), clampTop(menuHeight, anchorY), menuWidth, menuHeight);
+        };
+        apply(estimatedWidth, estimatedHeight);
         setOpensLeft(anchorX > window.innerWidth - 240);
+        const size = measureSize();
+        if (size) apply(size.width, size.height);
         requestAnimationFrame(() => {
-          if (!measure()) return;
-          const r = menuRef.current?.getBoundingClientRect();
-          if (r) {
-            setMenuRect({
-              left: resolveLeft(r.width),
-              top: resolveTop(r.height),
-              width: r.width,
-              height: r.height
-            });
-          }
+          const refined = measureSize();
+          if (refined) apply(refined.width, refined.height);
         });
       }
     } else {
       const trigger = triggerRef?.current;
       if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
-      const estimatedWidth = 190;
-      const estimatedHeight = 240;
-      let left: number;
-      if (align === 'center') left = rect.left + rect.width / 2 - estimatedWidth / 2;
-      else if (align === 'right') left = rect.right - estimatedWidth;
-      else left = rect.left;
-      left = Math.max(8, Math.min(left, window.innerWidth - estimatedWidth - 8));
-      const top =
-        position === 'top'
-          ? Math.max(8, rect.top - estimatedHeight - 8)
-          : Math.min(window.innerHeight - estimatedHeight - 8, rect.bottom + 8);
-      setMenuRect({ left, top, width: estimatedWidth, height: estimatedHeight });
-      setOpensLeft(rect.right > window.innerWidth - 240);
-      requestAnimationFrame(() => {
-        if (!measure()) return;
-        const r = menuRef.current?.getBoundingClientRect();
-        if (!r) return;
-        let refinedLeft: number;
-        if (align === 'center') refinedLeft = rect.left + rect.width / 2 - r.width / 2;
-        else if (align === 'right') refinedLeft = rect.right - r.width;
-        else refinedLeft = rect.left;
-        refinedLeft = Math.max(8, Math.min(refinedLeft, window.innerWidth - r.width - 8));
-        const refinedTop =
+      const apply = (menuWidth: number, menuHeight: number) => {
+        let left: number;
+        if (align === 'center') left = rect.left + rect.width / 2 - menuWidth / 2;
+        else if (align === 'right') left = rect.right - menuWidth;
+        else left = rect.left;
+        left = Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8));
+        const top =
           position === 'top'
-            ? Math.max(8, rect.top - r.height - 8)
-            : Math.min(window.innerHeight - r.height - 8, rect.bottom + 8);
-        setMenuRect({ left: refinedLeft, top: refinedTop, width: r.width, height: r.height });
+            ? Math.max(8, rect.top - menuHeight - 8)
+            : Math.min(window.innerHeight - menuHeight - 8, rect.bottom + 8);
+        commitRect(left, top, menuWidth, menuHeight);
+      };
+      apply(190, 240);
+      setOpensLeft(rect.right > window.innerWidth - 240);
+      const size = measureSize();
+      if (size) apply(size.width, size.height);
+      requestAnimationFrame(() => {
+        const refined = measureSize();
+        if (refined) apply(refined.width, refined.height);
       });
     }
 
@@ -201,10 +190,13 @@ export function PopoverMenu({
 
   if (!open) return null;
 
-  // 右键菜单：从鼠标锚点所在角落向外生长，而不是从菜单中心弹出
+  // 右键菜单：从鼠标锚点所在角落向外生长；
+  // 按钮锚定：从贴近触发按钮的一边生长（position=top 在按钮上方 → 底边为原点）
   const transformOrigin = cursorAnchored
     ? `${opensLeft ? 'right' : 'left'} ${opensUp ? 'bottom' : 'top'}`
-    : 'center center';
+    : position === 'top'
+      ? 'center bottom'
+      : 'center top';
 
   const currentLevelItems = (() => {
     let level = items;
@@ -377,7 +369,7 @@ export function PopoverMenu({
       onKeyDown={handleKeyDown}
       onClick={(event) => event.stopPropagation()}
     >
-      {renderLevel(items, 0)}
+      {children !== undefined ? children : renderLevel(items, 0)}
     </div>,
     document.body
   );

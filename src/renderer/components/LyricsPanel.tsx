@@ -3,7 +3,7 @@ import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { Fragment, type CSSProperties, type MouseEvent, type RefObject, type WheelEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { findActiveLyricLine, getLyricLineProgress, parseLrc } from '../lyrics/lyricsTimeline';
+import { findActiveLyricLine, getLyricCharStartMs, getLyricLineProgress, parseLrc } from '../lyrics/lyricsTimeline';
 import { createTranslationMap } from '../lyrics/lyricsTranslation';
 import {
   centerDepthPointer,
@@ -85,6 +85,12 @@ interface LyricsMediaClockContext {
 interface LyricLineFillCache {
   line: HTMLElement | null;
   progress: number;
+  /** 逐字模式下的 fill 容器（.lyric-line-text-fill[data-char-fill]） */
+  container: HTMLElement | null;
+  /** 逐字模式所属行索引，行切换时失效 */
+  lineIndex: number;
+  /** 已填满的字符数，-1 表示未初始化（首次同步时全量重建） */
+  filledCount: number;
 }
 
 interface LyricsPanelProps {
@@ -107,6 +113,8 @@ export function LyricsPanel({
 }: LyricsPanelProps) {
   const currentSong = usePlayerStore((state) => state.currentSong);
   const currentPlaybackUrl = usePlayerStore((state) => state.currentPlaybackUrl);
+  const storeMediaElement = usePlayerStore((state) => state.mediaElement);
+  const hostMedia = storeMediaElement ?? mediaRef?.current ?? null;
   const playbackDurationMs = usePlayerStore((state) => state.playbackDurationMs);
   const playbackSeekRevision = usePlayerStore((state) => state.playbackSeekRevision);
   const setLyricsOpen = usePlayerStore((state) => state.setLyricsOpen);
@@ -150,13 +158,17 @@ export function LyricsPanel({
   const lyricMediaClockActiveRef = useRef(false);
   const lyricLineFillCacheRef = useRef<LyricLineFillCache>({
     line: null,
-    progress: -1
+    progress: -1,
+    container: null,
+    lineIndex: -1,
+    filledCount: -1
   });
   const chromeIdleTimeoutRef = useRef(0);
   const idleDepthStartTimeoutRef = useRef(0);
   const lyricsAutoScrollFrameRef = useRef(0);
   const lyricsVirtualScrollFrameRef = useRef(0);
   const lyricsScrollIdleTimeoutRef = useRef(0);
+  const lastProgrammaticLyricScrollAtRef = useRef(0);
   const lyricLineSizesRef = useRef<Array<number | undefined>>([]);
   const lyricLineSizeKeyRef = useRef('');
   const isAutoScrollingLyricsRef = useRef(false);
@@ -474,8 +486,28 @@ export function LyricsPanel({
     return true;
   }
 
-  function syncActiveLyricFill(_index: number, lineProgress: number) {
-    syncLyricLineProgress(activeLineRef.current, lineProgress, lyricLineFillCacheRef.current);
+  function syncActiveLyricFill(index: number, lineProgress: number, positionMs?: number) {
+    const line = activeLineRef.current;
+    if (!line) {
+      resetLyricLineFillCache(lyricLineFillCacheRef.current);
+      return;
+    }
+
+    const container = line.querySelector<HTMLElement>('[data-char-fill]');
+    if (container) {
+      const { lines: currentLines, durationMs } = lyricMediaClockContextRef.current;
+      syncCharFill(
+        container,
+        index,
+        positionMs ?? playbackPositionRef.current,
+        currentLines,
+        durationMs,
+        lyricLineFillCacheRef.current
+      );
+      return;
+    }
+
+    syncLyricLineProgress(line, lineProgress, lyricLineFillCacheRef.current);
   }
 
   useLayoutEffect(() => () => invalidateTransitionSession(), []);
@@ -730,7 +762,7 @@ export function LyricsPanel({
     }
 
     resetLyricLineFillCache(lyricLineFillCacheRef.current);
-    const media = mediaRef?.current;
+    const media = hostMedia;
     if (
       media &&
       isCurrentLyricsMedia(media, currentPlaybackUrl) &&
@@ -743,8 +775,8 @@ export function LyricsPanel({
     }
 
     const lineProgress = getLyricLineProgress(lines, nextIndex, positionMs, durationMs);
-    syncActiveLyricFill(nextIndex, lineProgress);
-  }, [currentPlaybackUrl, currentSong?.id, lines, lyricDurationMs, mediaRef, playbackSeekRevision]);
+    syncActiveLyricFill(nextIndex, lineProgress, positionMs);
+  }, [currentPlaybackUrl, currentSong?.id, hostMedia, lines, lyricDurationMs, mediaRef, playbackSeekRevision]);
 
   // The layout pass above may commit the active line state. Synchronize the
   // newly rendered line after React has committed it, without making the
@@ -757,7 +789,7 @@ export function LyricsPanel({
       playbackPositionRef.current,
       durationMs
     );
-    syncActiveLyricFill(activeIndex, lineProgress);
+    syncActiveLyricFill(activeIndex, lineProgress, playbackPositionRef.current);
   }, [activeIndex]);
 
   useEffect(() => usePlayerStore.subscribe((state, previousState) => {
@@ -797,11 +829,11 @@ export function LyricsPanel({
     }
 
     const lineProgress = getLyricLineProgress(lines, nextIndex, positionMs, durationMs);
-    syncActiveLyricFill(nextIndex, lineProgress);
+    syncActiveLyricFill(nextIndex, lineProgress, positionMs);
   }), [lines]);
 
   useEffect(() => {
-    const media = mediaRef?.current;
+    const media = hostMedia;
     if (!media) {
       cancelLyricMediaClockFrame();
       setLyricMediaClockActive(false);
@@ -881,7 +913,7 @@ export function LyricsPanel({
       media.removeEventListener('ended', handlePause);
       media.removeEventListener('emptied', handleInterruptedPlayback);
     };
-  }, [currentPlaybackUrl, currentSong?.id, mediaRef]);
+  }, [currentPlaybackUrl, currentSong?.id, hostMedia, mediaRef]);
 
   useEffect(() => {
     lyricsMountedRef.current = true;
@@ -1123,7 +1155,7 @@ export function LyricsPanel({
     return () => resizeObserver?.disconnect();
   }, [lyricLineSizeKey, lyricVirtualIndexes, lyricsVirtualized]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (lyricsScrollState !== 'settled') {
       return;
     }
@@ -1636,7 +1668,8 @@ export function LyricsPanel({
 
   function handleLyricLineClick(index: number) {
     const line = lines[index];
-    if (!line || index > activeIndex) {
+    // 允许点击任意行（含当前行下方的未来行）跳转到该句开始播放
+    if (!line) {
       return;
     }
 
@@ -1647,6 +1680,7 @@ export function LyricsPanel({
     const isActive = index === activeIndex;
     const lineProgress = isActive ? activeLineProgress : index < activeIndex ? 1 : 0;
     const isLongActiveLine = isActive && Array.from(line.text).length > lyricLongLineThreshold;
+    const isCharFill = isActive && !isLongActiveLine;
     const lyricDistance = getLyricDistance(index, activeIndex);
     const translation = translationsByStartMs.get(line.startMs);
     const className = [
@@ -1681,7 +1715,17 @@ export function LyricsPanel({
         <div className="lyric-text-content">
           <span className="lyric-line-text" aria-label={line.text}>
             <span className="lyric-line-text-base">{line.text}</span>
-            <span className="lyric-line-text-fill" aria-hidden="true">{line.text}</span>
+            {isCharFill ? (
+              <span className="lyric-line-text-fill" aria-hidden="true" data-char-fill>
+                {Array.from(line.text).map((char, charIndex) => (
+                  <span key={charIndex} className="lyric-char-fill" data-char-index={charIndex}>
+                    {char}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="lyric-line-text-fill" aria-hidden="true">{line.text}</span>
+            )}
           </span>
           {showTranslation && translation ? <span className="lyrics-translation-text">{translation}</span> : null}
         </div>
@@ -1736,7 +1780,13 @@ export function LyricsPanel({
 
   function handleLyricsScroll() {
     scheduleLyricsVirtualViewportUpdate();
-    if (isAutoScrollingLyricsRef.current || isAdjustingLyricFontRef.current) {
+    // 程序性滚动（rAF 自动定位）会派发 scroll 事件，不能把它当成用户滚动而
+    // 挂上 .user-scrolling（导致逐行模糊消失）。距上次程序滚动 <200ms 视为同一程序滚动。
+    if (
+      isAutoScrollingLyricsRef.current
+      || isAdjustingLyricFontRef.current
+      || performance.now() - lastProgrammaticLyricScrollAtRef.current < 200
+    ) {
       return;
     }
 
@@ -1875,8 +1925,14 @@ export function LyricsPanel({
         return;
       }
 
+      // 自动滚动期间用精确 scrollTop（桶化会让虚拟窗口滞后于逐帧滚动，
+      // 行来回挂载/卸载造成"染色后行消失再出现"的跳动感）
+      const scrollTop = isAutoScrollingLyricsRef.current
+        ? Math.max(0, viewport.scrollTop)
+        : Math.floor(Math.max(0, viewport.scrollTop) / lyricVirtualScrollBucketPx) * lyricVirtualScrollBucketPx;
+
       const nextViewport = {
-        scrollTop: Math.floor(Math.max(0, viewport.scrollTop) / lyricVirtualScrollBucketPx) * lyricVirtualScrollBucketPx,
+        scrollTop,
         viewportSize: viewport.clientHeight || 540
       };
       setLyricsVirtualViewport((current) => (
@@ -1937,9 +1993,11 @@ export function LyricsPanel({
     const tick = (time: number) => {
       const elapsedMs = time - startedAt;
       viewport.scrollTop = createAnchoredLyricScrollFrame(startTop, targetTop, elapsedMs, lyricAutoScrollDurationMs);
+      lastProgrammaticLyricScrollAtRef.current = window.performance.now();
 
       if (elapsedMs >= lyricAutoScrollDurationMs) {
         viewport.scrollTop = targetTop;
+        lastProgrammaticLyricScrollAtRef.current = window.performance.now();
         lyricsAutoScrollFrameRef.current = 0;
         isAutoScrollingLyricsRef.current = false;
         return;
@@ -2153,7 +2211,7 @@ export function LyricsPanel({
 
     const lineProgress = getLyricLineProgress(currentLines, nextIndex, positionMs, durationMs);
 
-    syncActiveLyricFill(nextIndex, lineProgress);
+    syncActiveLyricFill(nextIndex, lineProgress, positionMs);
   }
 
 
@@ -2234,7 +2292,8 @@ function parseScrollPaddingTop(viewport: HTMLElement) {
 
 export function createAnchoredLyricScrollFrame(startTop: number, targetTop: number, elapsedMs: number, durationMs = lyricAutoScrollDurationMs) {
   const progress = clamp(elapsedMs / Math.max(1, durationMs));
-  return startTop + (targetTop - startTop) * easeInOutCubic(progress);
+  // easeOutCubic：启动即动（行切换的染色与滚动同步），收尾缓停
+  return startTop + (targetTop - startTop) * easeOutCubic(progress);
 }
 
 function createPlainLyricLines(input: string) {
@@ -2325,6 +2384,9 @@ function formatProgressPercent(progress: number) {
 function resetLyricLineFillCache(cache: LyricLineFillCache) {
   cache.line = null;
   cache.progress = -1;
+  cache.container = null;
+  cache.lineIndex = -1;
+  cache.filledCount = -1;
 }
 
 function syncLyricLineProgress(line: HTMLElement | null, progress: number, cache?: LyricLineFillCache) {
@@ -2347,6 +2409,125 @@ function syncLyricLineProgress(line: HTMLElement | null, progress: number, cache
     cache.line = line;
     cache.progress = safeProgress;
   }
+}
+
+/**
+ * 逐字描光：按行内字符时间轴（与 getLyricLineProgress 同一时间窗口均分）
+ * 计算"已填满字符数"，只更新边界处 1-2 个字符的 class，
+ * 已唱完的字符长期保持 .filled（纯色 + 微光，无每帧重绘）。
+ */
+function syncCharFill(
+  container: HTMLElement | null,
+  lineIndex: number,
+  positionMs: number,
+  lines: ReturnType<typeof parseLrc>,
+  durationMs: number,
+  cache: LyricLineFillCache
+) {
+  if (!container) {
+    if (cache.lineIndex === lineIndex) {
+      resetLyricLineFillCache(cache);
+    }
+    return;
+  }
+
+  const charCount = container.childElementCount;
+  if (charCount <= 0) {
+    return;
+  }
+
+  // 行切换（React 已渲染新行）→ 全量清理到初始未唱态
+  if (cache.lineIndex !== lineIndex || cache.container !== container || cache.filledCount < 0) {
+    cache.container = container;
+    cache.lineIndex = lineIndex;
+    cache.filledCount = 0;
+    for (let index = 0; index < charCount; index += 1) {
+      const span = container.children[index] as HTMLElement;
+      span.classList.remove('filled', 'filling');
+      span.style.removeProperty('--lyric-char-progress');
+    }
+  }
+
+  const line = lines[lineIndex];
+  if (!line) {
+    return;
+  }
+
+  const nextStartMs = lines[lineIndex + 1]?.startMs;
+  const endMs = nextStartMs ?? durationMs;
+  const safeEndMs = endMs > line.startMs ? endMs : line.startMs + 4000;
+  const lineDurationMs = safeEndMs - line.startMs;
+  if (lineDurationMs <= 0) {
+    return;
+  }
+
+  const charDurationMs = lineDurationMs / charCount;
+  const filledCount = clampCharCount(Math.floor((positionMs - line.startMs) / charDurationMs), charCount);
+  const prevFilled = cache.filledCount;
+
+  // 无填满数变化：当前字内部渐变推进，仅原地更新进度（带最小阈值防抖）
+  if (filledCount === prevFilled) {
+    if (filledCount < charCount) {
+      updateFillingChar(container, filledCount, positionMs, lines, lineIndex, charCount, charDurationMs, durationMs);
+    }
+    return;
+  }
+
+  if (filledCount > prevFilled) {
+    // 前进：把 [prevFilled, filledCount) 标为已唱完
+    for (let index = prevFilled; index < filledCount; index += 1) {
+      const span = container.children[index] as HTMLElement;
+      span.classList.remove('filling');
+      span.classList.add('filled');
+      span.style.removeProperty('--lyric-char-progress');
+    }
+  } else {
+    // 回退（seek 后退等）：清掉 [filledCount, prevFilled]
+    for (let index = filledCount; index <= prevFilled; index += 1) {
+      const span = container.children[index] as HTMLElement;
+      span.classList.remove('filled', 'filling');
+      span.style.removeProperty('--lyric-char-progress');
+    }
+  }
+
+  if (filledCount < charCount) {
+    // 当前字转渐变态
+    updateFillingChar(container, filledCount, positionMs, lines, lineIndex, charCount, charDurationMs, durationMs);
+  } else {
+    // 行唱完：最后一个字也转为纯色
+    const lastSpan = container.children[charCount - 1] as HTMLElement;
+    lastSpan.classList.remove('filling');
+    lastSpan.style.removeProperty('--lyric-char-progress');
+  }
+
+  cache.filledCount = filledCount;
+}
+
+function updateFillingChar(
+  container: HTMLElement,
+  charIndex: number,
+  positionMs: number,
+  lines: ReturnType<typeof parseLrc>,
+  lineIndex: number,
+  charCount: number,
+  charDurationMs: number,
+  durationMs: number
+) {
+  const span = container.children[charIndex] as HTMLElement;
+  span.classList.remove('filled');
+  span.classList.add('filling');
+  const charStartMs = getLyricCharStartMs(lines, lineIndex, charIndex, charCount, durationMs);
+  const charProgress = clamp((positionMs - charStartMs) / charDurationMs);
+  const percent = Math.round(charProgress * 1000) / 10;
+  const previousPercent = parseFloat(span.style.getPropertyValue('--lyric-char-progress'));
+  // 注意：首次无值时 parseFloat 为 NaN，NaN 比较恒为 false 会导致渐变永远停在 0%（整字跳变）
+  if (Number.isNaN(previousPercent) || Math.abs(percent - previousPercent) >= 0.05) {
+    span.style.setProperty('--lyric-char-progress', `${percent}%`);
+  }
+}
+
+function clampCharCount(value: number, max: number) {
+  return Math.max(0, Math.min(max, Number.isFinite(value) ? value : 0));
 }
 
 function isCurrentLyricsMedia(media: HTMLAudioElement | null | undefined, playbackUrl: string | null) {
@@ -2762,6 +2943,10 @@ export function createCenterReturnPointer(startPointer: typeof centerPointer, el
 
 function easeInOutCubic(value: number) {
   return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+}
+
+function easeOutCubic(value: number) {
+  return 1 - Math.pow(1 - value, 3);
 }
 
 function getPointerDistance(current: typeof centerPointer, target: typeof centerPointer) {

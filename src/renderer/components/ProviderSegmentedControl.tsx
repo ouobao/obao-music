@@ -6,6 +6,13 @@ interface ProviderSegmentedControlProps<T extends string> {
   onChange: (id: T) => void;
   ariaLabel: string;
   className?: string;
+  /**
+   * 控件所在容器是否处于可见状态（如弹窗 open）。
+   * 状态变化时触发重新测量；测量用 offsetLeft/offsetWidth 布局属性，
+   * 不受祖先 transform 影响，弹窗缩放动画期间也能得到正确几何，
+   * 激活项文字始终有滑块衬底。
+   */
+  active?: boolean;
 }
 
 /**
@@ -17,7 +24,8 @@ export function ProviderSegmentedControl<T extends string>({
   activeId,
   onChange,
   ariaLabel,
-  className
+  className,
+  active = true
 }: ProviderSegmentedControlProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null);
   const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -29,16 +37,32 @@ export function ProviderSegmentedControl<T extends string>({
     const measure = () => {
       const activeBtn = buttonRefs.current[activeId];
       if (!activeBtn) return;
-      const containerRect = container.getBoundingClientRect();
-      const btnRect = activeBtn.getBoundingClientRect();
-      setThumb({ left: btnRect.left - containerRect.left, width: btnRect.width });
+      // 必须用 offsetLeft/offsetWidth（布局属性）而非 getBoundingClientRect：
+      // 后者受祖先 transform（如弹窗 scale 入场动画）影响，会量到过渡中间值
+      // 并定格，滑块错位后激活项的近黑文字失去白色衬底，表现为"文字消失"
+      if (activeBtn.offsetParent === container) {
+        setThumb({ left: activeBtn.offsetLeft, width: activeBtn.offsetWidth });
+      } else {
+        const containerRect = container.getBoundingClientRect();
+        const btnRect = activeBtn.getBoundingClientRect();
+        setThumb({ left: btnRect.left - containerRect.left, width: btnRect.width });
+      }
     };
     measure();
-    // 窗口尺寸变化时重新测量（主题/缩放等也可能改变按钮宽度）
+    // 两帧后再校准一次（首帧可能仍在弹窗入场布局中），并监听容器尺寸变化
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      measure();
+      secondFrame = window.requestAnimationFrame(measure);
+    });
     const observer = new ResizeObserver(measure);
     observer.observe(container);
-    return () => observer.disconnect();
-  }, [activeId, options]);
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+      observer.disconnect();
+    };
+  }, [activeId, options, active]);
 
   return (
     <div

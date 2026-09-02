@@ -69,7 +69,7 @@ export function PlaylistDiscoveryView() {
             <button
               key={cat.id}
               className={`pill-item ${categoryId === cat.id ? 'active' : ''}`}
-              style={categoryId === cat.id ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 600 } : undefined}
+              style={categoryId === cat.id ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
               onClick={() => { setActiveCategoryId(cat.id); setAllPanelOpen(false); }}
             >
               {cat.name}
@@ -78,7 +78,7 @@ export function PlaylistDiscoveryView() {
           <button
             ref={allButtonRef}
             className={`pill-item ${allPanelOpen ? 'active' : ''}`}
-            style={allPanelOpen ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 600 } : undefined}
+            style={allPanelOpen ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
             onClick={() => setAllPanelOpen((open) => !open)}
             aria-haspopup="menu"
             aria-expanded={allPanelOpen}

@@ -4,20 +4,32 @@ import { useUiStore } from '../state/uiStore';
 import { formatDuration } from '../utils/format';
 import { sourceLabel } from '../utils/providerDisplay';
 import { onImageReveal, imageRevealRef } from '../utils/imageReveal';
+import { toThumbnailUrl } from '../utils/remoteCover';
 import { useSongContextMenu } from '../hooks/useSongContextMenu';
+import { useFixedVirtualWindow } from '../hooks/useFixedVirtualWindow';
 import { PopoverMenu } from './PopoverMenu';
 import { CloseIcon, HeartIcon } from './icons';
 
-const QUEUE_CHUNK_SIZE = 100;
+/** 固定行高：32px 内容 + 8px*2 padding + 4px 列表间距 */
+const QUEUE_ITEM_SIZE = 56;
+/** 超过该数量启用虚拟滚动（≤时走原 flex 布局） */
+const QUEUE_VIRTUAL_THRESHOLD = 40;
 
 function QueueSongItem({
   item,
   song,
-  isCurrent
+  isCurrent,
+  virtualOffset,
+  instantReveal,
+  entryIndex
 }: {
   item: ReturnType<typeof usePlayerStore.getState>['queue'][number];
   song: ReturnType<typeof usePlayerStore.getState>['queueSongs'][string];
   isCurrent: boolean;
+  virtualOffset?: number;
+  instantReveal?: boolean;
+  /** 列表中的真实索引，用于进入动画的 --i 交错延迟 */
+  entryIndex?: number;
 }) {
   const selectQueueItem = usePlayerStore((s) => s.selectQueueItem);
   const removeQueueItem = usePlayerStore((s) => s.removeQueueItem);
@@ -44,7 +56,13 @@ function QueueSongItem({
 
   return (
     <div
-      className={`queue-song-item ${isCurrent ? 'playing' : ''}`}
+      className={`queue-song-item ${isCurrent ? 'playing' : ''} ${virtualOffset !== undefined ? 'virtual' : ''}`}
+      style={
+        {
+          ...(virtualOffset !== undefined ? { '--queued-item-y': `${virtualOffset}px` } : {}),
+          ...(entryIndex !== undefined ? { '--i': Math.min(entryIndex, 24) } : {})
+        } as React.CSSProperties
+      }
       onClick={() => selectQueueItem(item.id)}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -54,7 +72,15 @@ function QueueSongItem({
       title={sourceLabel(item.source, song.providerId)}
     >
       {song.coverUrl ? (
-        <img className="queue-song-cover" ref={imageRevealRef} src={song.coverUrl} alt="" loading="lazy" onLoad={onImageReveal} onError={onImageReveal} />
+        <img
+          className={`queue-song-cover${instantReveal ? ' no-reveal' : ''}`}
+          ref={imageRevealRef}
+          src={toThumbnailUrl(song.coverUrl)}
+          alt=""
+          loading="lazy"
+          onLoad={onImageReveal}
+          onError={onImageReveal}
+        />
       ) : (
         <div className="queue-song-cover" style={{ background: song.coverTone || 'var(--bg-card)' }} />
       )}
@@ -105,7 +131,7 @@ function QueueSongItem({
           cursorAnchored={contextMenu.cursorAnchored}
           position="bottom"
           align="right"
-          style={{ width: 190 }}
+          style={{ width: 156 }}
           ariaLabel="队列歌曲操作"
           items={menuItems}
         />
@@ -117,37 +143,80 @@ function QueueSongItem({
 export function QueuePanel() {
   const queue = usePlayerStore((s) => s.queue);
   const queueSongs = usePlayerStore((s) => s.queueSongs);
+  const queueEpoch = usePlayerStore((s) => s.queueEpoch);
   const currentQueueItemId = usePlayerStore((s) => s.currentQueueItemId);
   const clearQueue = usePlayerStore((s) => s.clearQueue);
   const isQueueOpen = useUiStore((s) => s.isQueueOpen);
   const setQueueOpen = useUiStore((s) => s.setQueueOpen);
   const isLyricsOpen = usePlayerStore((s) => s.isLyricsOpen);
-
-  // 队列大列表增量渲染
-  const [renderCount, setRenderCount] = useState(QUEUE_CHUNK_SIZE);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setRenderCount(Math.min(QUEUE_CHUNK_SIZE, queue.length));
-  }, [queue.length]);
+  // 首次打开：封面直接显示（跳过淡入过渡），避免首开时成群加载+同步过渡卡顿
+  const [instantReveal, setInstantReveal] = useState(false);
+  const openedOnceRef = useRef(false);
+  // 面板打开时的条目进入动画：只在打开瞬间保持（滚动新挂载的行不再触发动画）
+  const [entryAnimActive, setEntryAnimActive] = useState(false);
+  const entryAnimTimerRef = useRef(0);
 
   useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-    const list = el.closest<HTMLElement>('.queue-song-list');
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (!entries[0].isIntersecting) return;
-        setRenderCount((count) => Math.min(queue.length, count + QUEUE_CHUNK_SIZE));
-      },
-      { root: list ?? null, rootMargin: '500px 0px' }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queue.length]);
+    if (!isQueueOpen || openedOnceRef.current) return;
+    openedOnceRef.current = true;
+    setInstantReveal(true);
+    // 打开后下一轮渲染恢复正常淡入（仅首次无过渡）
+  }, [isQueueOpen]);
 
-  const visibleQueue = renderCount >= queue.length ? queue : queue.slice(0, renderCount);
+  // 打开时启动条目入场动画，动画播完后移除类（避免滚动加载的新行重复淡入）
+  useEffect(() => {
+    if (entryAnimTimerRef.current) {
+      window.clearTimeout(entryAnimTimerRef.current);
+      entryAnimTimerRef.current = 0;
+    }
+    if (!isQueueOpen) {
+      setEntryAnimActive(false);
+      return;
+    }
+    setEntryAnimActive(true);
+    entryAnimTimerRef.current = window.setTimeout(() => {
+      entryAnimTimerRef.current = 0;
+      setEntryAnimActive(false);
+    }, 1600);
+    return () => {
+      if (entryAnimTimerRef.current) {
+        window.clearTimeout(entryAnimTimerRef.current);
+        entryAnimTimerRef.current = 0;
+      }
+    };
+  }, [isQueueOpen]);
+
+  // 打开时预热可见区封面：让首屏图片提前进入 HTTP/解码缓存，
+  // 打开瞬间 <img> 直接从缓存渲染，避免成群加载与解码延迟
+  useEffect(() => {
+    if (!isQueueOpen || queue.length === 0) return;
+    const visibleCount = Math.min(queue.length, 20);
+    for (let index = 0; index < visibleCount; index += 1) {
+      const song = queueSongs[queue[index].mediaId];
+      if (song?.coverUrl) {
+        const preloader = new Image();
+        preloader.src = toThumbnailUrl(song.coverUrl);
+      }
+    }
+  }, [isQueueOpen, queue, queueSongs]);
+
+  const virtualized = queue.length > QUEUE_VIRTUAL_THRESHOLD;
+  const {
+    scrollHostRef,
+    startIndex,
+    endIndex,
+    offsetTop,
+    totalHeight
+  } = useFixedVirtualWindow({
+    enabled: virtualized,
+    itemCount: queue.length,
+    itemSize: QUEUE_ITEM_SIZE,
+    overscan: 6,
+    fallbackViewportSize: 560,
+    resetKey: String(queueEpoch)
+  });
+
+  const visibleQueue = virtualized ? queue.slice(startIndex, endIndex) : queue;
 
   return (
     <>
@@ -164,26 +233,51 @@ export function QueuePanel() {
             </button>
           )}
         </div>
-        <div className="queue-song-list">
+        <div
+          className={`queue-song-list ${virtualized ? 'queued-list-virtual' : ''} ${entryAnimActive ? 'queued-entry-anim' : ''}`}
+          ref={scrollHostRef}
+        >
           {queue.length === 0 && (
             <div style={{ padding: 24, textAlign: 'center', fontSize: 12.5, color: 'var(--text-tertiary)' }}>
               队列为空，播放歌曲后会自动加入
             </div>
           )}
-          {visibleQueue.map((item) => {
-            const song = queueSongs[item.mediaId];
-            if (!song) return null;
-            const isCurrent = item.id === currentQueueItemId;
-            return (
-              <QueueSongItem
-                key={item.id}
-                item={item}
-                song={song}
-                isCurrent={isCurrent}
-              />
-            );
-          })}
-          {renderCount < queue.length && <div ref={sentinelRef} style={{ height: 1 }} aria-hidden="true" />}
+          {virtualized ? (
+            <div className="queued-list-spacer" style={{ height: totalHeight }}>
+              {visibleQueue.map((item, index) => {
+                const song = queueSongs[item.mediaId];
+                if (!song) return null;
+                const isCurrent = item.id === currentQueueItemId;
+                return (
+                  <QueueSongItem
+                    key={item.id}
+                    item={item}
+                    song={song}
+                    isCurrent={isCurrent}
+                    virtualOffset={offsetTop + index * QUEUE_ITEM_SIZE}
+                    instantReveal={instantReveal}
+                    entryIndex={startIndex + index}
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            queue.map((item, index) => {
+              const song = queueSongs[item.mediaId];
+              if (!song) return null;
+              const isCurrent = item.id === currentQueueItemId;
+              return (
+                <QueueSongItem
+                  key={item.id}
+                  item={item}
+                  song={song}
+                  isCurrent={isCurrent}
+                  instantReveal={instantReveal}
+                  entryIndex={index}
+                />
+              );
+            })
+          )}
         </div>
       </div>
     </>

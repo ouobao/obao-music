@@ -7,6 +7,7 @@ import { useSongContextMenu } from '../hooks/useSongContextMenu';
 import { PopoverMenu } from './PopoverMenu';
 import { formatDuration } from '../utils/format';
 import { onImageReveal, imageRevealRef } from '../utils/imageReveal';
+import { toThumbnailUrl } from '../utils/remoteCover';
 
 export function SimilarSongsPanel() {
   const currentSong = usePlayerStore((s) => s.currentSong);
@@ -164,7 +165,7 @@ function SimilarSongItem({
       }}
     >
       {song.coverUrl ? (
-        <img className="queue-song-cover" ref={imageRevealRef} src={song.coverUrl} alt="" loading="lazy" onLoad={onImageReveal} onError={onImageReveal} />
+        <img className="queue-song-cover" ref={imageRevealRef} src={toThumbnailUrl(song.coverUrl)} alt="" loading="lazy" onLoad={onImageReveal} onError={onImageReveal} />
       ) : (
         <div className="queue-song-cover" style={{ background: song.coverTone || 'var(--bg-card)' }} />
       )}

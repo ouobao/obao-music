@@ -4,7 +4,13 @@
  */
 :root {
   --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
-  
+
+  /* 字重三档：正文 400 / 标题·按钮·激活 600 / 大标题·激活歌词 700
+     （Windows 雅黑仅有 400/700 两档，600 渲染为 Bold；分层语义供 macOS/可变字体生效） */
+  --font-weight-regular: 400;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
   /* 苹果 Apple-tier 物理缓动与弹性时间 */
   --ease-desktop-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-desktop-in-out: cubic-bezier(0.45, 0, 0.15, 1);
@@ -100,6 +106,8 @@
   /* 层级（集中定义） */
   --z-topbar: 9;
   --z-sidebar: 10;
+  /* 浮动按钮（定位/回顶部）：低于抽屉遮罩，抽屉打开时自然被盖住 */
+  --z-float-btn: 13;
   --z-drawer-overlay: 14;
   --z-drawer: 15;
   --z-player: 20;

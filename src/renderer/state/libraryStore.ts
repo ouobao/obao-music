@@ -16,7 +16,7 @@ export interface LibraryState {
   likedSongIds: Record<ProviderId, Set<string>>;
   likedLoaded: Record<ProviderId, boolean>;
 
-  loadProviderPlaylists(providerId: ProviderId): Promise<void>;
+  loadProviderPlaylists(providerId: ProviderId, options?: { force?: boolean }): Promise<void>;
   loadPlaylistTracks(providerId: ProviderId, playlistId: string): Promise<void>;
   seedPlaylistTracks(providerId: ProviderId, playlistId: string, tracks: Song[]): void;
   selectPlaylist(providerId: ProviderId, playlistId: string): void;
@@ -41,8 +41,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   likedSongIds: { netease: new Set(), qq: new Set(), local: new Set() },
   likedLoaded: { netease: false, qq: false, local: false },
 
-  async loadProviderPlaylists(providerId) {
-    if (get().playlistsLoading[providerId]) return;
+  async loadProviderPlaylists(providerId, options) {
+    if (!options?.force && get().playlistsLoading[providerId]) return;
     set((state) => ({ playlistsLoading: { ...state.playlistsLoading, [providerId]: true } }));
     try {
       const result = await window.musicPlayer.music.getUserPlaylists(providerId);

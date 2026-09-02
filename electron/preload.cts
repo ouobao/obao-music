@@ -125,8 +125,8 @@ const api = {
       ipcRenderer.invoke('music:skip-radio-session-item', session, item) as Promise<unknown>,
     submitRadioNegativeFeedback: (session: unknown, item: unknown) =>
       ipcRenderer.invoke('music:submit-radio-negative-feedback', session, item) as Promise<unknown>,
-    getSongUrl: (providerId: string, song: unknown, quality: string) =>
-      ipcRenderer.invoke('music:get-song-url', providerId, song, quality) as Promise<unknown>,
+    getSongUrl: (providerId: string, song: unknown, quality: string, options?: { forceRefresh?: boolean }) =>
+      ipcRenderer.invoke('music:get-song-url', providerId, song, quality, options) as Promise<unknown>,
     getLyrics: (providerId: string, song: unknown) =>
       ipcRenderer.invoke('music:get-lyrics', providerId, song) as Promise<unknown>,
     setSongLiked: (providerId: string, song: unknown, liked: boolean) =>
