@@ -1,184 +1,421 @@
 /**
- * Aether Flow 设计系统设计令牌 (Design Tokens)
- * 针对 Electron 桌面应用窗口特化：统一高斯模糊、苹果级物理缓动与层次圆角
+ * Studio · 设计令牌
+ * ---------------------------------------------------------------
+ * 设计原则（与上一版"舞台/极光"体系相反）：
+ *
+ *   1. 界面是背景，封面是主角。不用极光、不用全幅模糊封面铺底，
+ *      不让装饰色抢走专辑封面的颜色。
+ *   2. 中性优先。整套 UI 只用暖中性灰阶；唯一的彩色是"正在播放"的
+ *      琥珀色强调，且只出现在极小面积（播放指示、当前行、少量链接）。
+ *   3. 扁平。外壳是整块面板 + 1px 发丝分隔线，不做悬浮玻璃卡片、
+ *      不做 backdrop-blur、不做发光投影。阴影只服务于真正浮起的层
+ *      （菜单/弹窗/抽屉）。
+ *   4. 紧凑几何。圆角 4/6/8/10/12，不用 20–32px 的大圆角。
+ *   5. 字阶克制。不再用 38–46px 的展示级标题压场，靠字重与留白建立层级。
+ *
+ * 兼容：保留全部历史变量名（组件与歌词页仍在引用），只替换取值。
  */
 :root {
-  --font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color-scheme: dark;
 
-  /* 字重三档：正文 400 / 标题·按钮·激活 600 / 大标题·激活歌词 700
-     （Windows 雅黑仅有 400/700 两档，600 渲染为 Bold；分层语义供 macOS/可变字体生效） */
+  /* ---------------- 字体 ----------------
+     Windows 上用 Segoe UI Variable（系统自带、字重齐全），
+     中文回退到 MiSans / 思源黑体 / 苹方 / 雅黑。 */
+  --font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", "MiSans", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", Roboto, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Display", "MiSans", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+
   --font-weight-regular: 400;
+  --font-weight-medium: 500;
   --font-weight-semibold: 600;
-  --font-weight-bold: 700;
+  --font-weight-bold: 650;
+  --font-weight-black: 700;
 
-  /* 苹果 Apple-tier 物理缓动与弹性时间 */
-  --ease-desktop-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-desktop-in-out: cubic-bezier(0.45, 0, 0.15, 1);
-  --ease-spring-gentle: cubic-bezier(0.25, 1, 0.5, 1);
-  --ease-lyrics-spring: cubic-bezier(0.32, 1.25, 0.32, 1);
+  /* 字阶：整体收一档。页面标题 28、区块标题 17、正文 14、注释 12。 */
+  --text-hero: 28px;
+  --text-display: 26px;
+  --text-h1: 20px;
+  --text-h2: 17px;
+  --text-h3: 15px;
+  --text-lg: 15px;
+  --text-md: 14px;
+  --text-sm: 13px;
+  --text-xs: 12px;
+  --text-2xs: 11px;
+  --text-micro: 10px;
 
-  /* 调整动效时长 */
-  --duration-micro: 180ms;
-  --duration-normal: 320ms;
-  --duration-page: 480ms;
-  --duration-lyrics: 620ms;
+  --leading-tight: 1.22;
+  --leading-snug: 1.42;
+  --leading-normal: 1.58;
+  --leading-relaxed: 1.72;
 
-  /* 📐 层次化圆角设计规范 */
-  --radius-drawer: 20px;
-  --radius-xl: 20px;
-  --radius-lg: 14px;
-  --radius-md: 10px;
-  --radius-sm: 8px;
-  --radius-xs: 5px;
+  --tracking-tight: -0.018em;
+  --tracking-snug: -0.008em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.01em;
+  --tracking-caps: 0.08em;
+
+  /* ---------------- 间距（8px 基准，逐级 +4） ----------------
+     实际被消费的是 3..9（8/12/16/20/24/32/40）。
+     原来还有 0/1/2/10/11 五档（2/4/6/56/72），全项目使用次数为 0，
+     已删除——留着只会让人误以为"间距是 2px 基准"。
+     需要更小的间距时直接写 4px / 6px 这类微调值，
+     不要为了单处需求再造一个新台阶。 */
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
+  --space-9: 40px;
+
+  /* ---------------- 外壳几何（贴边、无悬浮） ---------------- */
+  --rail-inset: 0px;           /* 侧栏贴窗口左边 */
+  --rail-width: 236px;
+  --rail-width-collapsed: 64px;
+  --dock-inset: 0px;           /* 播放坞贴窗口底边 */
+  --dock-height: 80px;
+  --chrome-top: 56px;          /* 顶栏高度 */
+  --chrome-gap: 0px;           /* 外壳之间不再留缝 */
+
+  --stage-left: calc(var(--rail-inset) + var(--rail-width) + var(--chrome-gap));
+  --stage-right: 0px;
+  --stage-bottom: calc(var(--dock-inset) + var(--dock-height) + var(--dock-inset));
+  --page-pad-x: 32px;
+  --page-pad-y: 28px;
+  --content-max: 1520px;
+
+  /* 兼容旧名 */
+  --sidebar-width: var(--rail-width);
+  --sidebar-width-collapsed: var(--rail-width-collapsed);
+  --topbar-height: var(--chrome-top);
+  --playerbar-height: var(--dock-height);
+
+  /* ---------------- 运动：三条曲线 + 四档时长 ----------------
+     曲线按"用途"命名，不按"感觉"命名。历史别名
+     （--ease-desktop-out / --ease-overshoot / --ease-spring-gentle /
+     --ease-lyrics-spring）已全部收口，不要再新增同义别名。
+
+     --ease-out         进入、淡入、hover 变色：起步快、收尾缓
+     --ease-in-out      位移、抽屉、折叠：两端对称，中段快
+     --ease-emphasized  浮层"到位感"：比 ease-out 更陡，无回弹
+     --ease-spring      仅 popover / toast：允许一次轻微过冲 */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0.9, 0.25, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.44, 1);
+
+  /* 时长只允许这四档。新增交互时按"变化的东西有多大"选档，
+     不要凭感觉写裸 ms 值（scripts/check-motion.cjs 会拦）。 */
+  --duration-micro: 120ms;  /* 颜色 / 背景 / 边框 / 文字色 */
+  --duration-fast: 160ms;   /* hover 位移、图标、进度条 */
+  --duration-base: 220ms;   /* 浮层、抽屉、菜单、Toast */
+  --duration-page: 320ms;   /* 视图切换、歌词进出、侧栏折叠 */
+
+  /* 列表逐个进场的步进。这些是"每项之间"的间隔，不是动画时长，
+     所以单独成令牌，不要复用 --duration-*。
+     步进 16ms + 封顶 6 项：第 7 项起与第 6 项同时开始，
+     避免长列表把入场拖到 1s 以上。 */
+  --stagger-step: 16ms;
+  --stagger-cap: 6;
+
+  /* ---------------- 圆角（四档 + 胶囊） ----------------
+     4 / 6 / 8 / 12。原来 5 与 6、10 与 12、12 与 14 三对在 1x 屏上
+     肉眼不可分，已合并；需要更"圆"的容器直接升一档，不要新增数值。 */
+  --radius-2xl: 12px;       /* 面板 / 抽屉 / 弹窗 */
+  --radius-xl: 12px;
+  --radius-lg: 8px;         /* 卡片 / 浮层 */
+  --radius-md: 6px;         /* 按钮 / 输入 / 列表封面 */
+  --radius-sm: 6px;
+  --radius-xs: 4px;         /* 徽标 / 角标 */
   --radius-pill: 9999px;
+  /* 兼容旧名：radius-3xl 与 drawer 都已并入 12 */
+  --radius-3xl: 12px;
+  --radius-drawer: 12px;
 
-  /* 统一深度与光影系统 */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.16);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.28);
-  --shadow-float: 0 20px 50px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border-light);
-  --shadow-glow-accent: 0 8px 28px var(--accent-glow);
+  /* ---------------- 阴影：只给真正浮起的层 ----------------
+     外壳（侧栏/顶栏/播放坞）一律无阴影，靠 1px 分隔线划分区域。 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 6px 18px rgba(0, 0, 0, 0.34);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.38);
+  --shadow-float: 0 16px 44px rgba(0, 0, 0, 0.46);
+  --shadow-dock: none;
+  --shadow-rail: none;
+  --shadow-glow-accent: none;
+  --shadow-cover: 0 1px 3px rgba(0, 0, 0, 0.32);
+  --shadow-inner-highlight: none;
 
-  /* 🌟 全局统一的高斯模糊标准 (Unified Backdrop Blur Standard) */
-  --blur-overlay: blur(28px) saturate(180%);
-  --blur-strong: blur(40px) saturate(190%);
-  --blur-lyrics: blur(72px) saturate(220%);
+  /* 模糊：全部关闭。浮层用实色，滚动更省 GPU，也不会糊成一片。 */
+  --blur-chrome: none;
+  --blur-panel: none;
+  --blur-overlay: none;
+  --blur-strong: none;
+  --blur-lyrics: none;
+  --blur-aurora: none;
+  --blur-artwork: none;
 
-  /* 1. 默认主题：暗夜曜黑 (Dark Onyx) */
-  --bg-app: #0c0d14;
-  --bg-sidebar: rgba(18, 20, 29, 0.82);
-  --bg-topbar: rgba(18, 20, 29, 0.78);
-  --bg-card: rgba(255, 255, 255, 0.05);
-  --bg-card-hover: rgba(255, 255, 255, 0.09);
-  --bg-active: rgba(255, 255, 255, 0.15);
-  --bg-panel: rgba(20, 23, 34, 0.94);
-  --bg-glass: rgba(255, 255, 255, 0.06);
-  --bg-glass-strong: rgba(255, 255, 255, 0.12);
-  --popover-bg: rgba(26, 30, 44, 0.96);
+  /* ---------------- 深色主题：Graphite ---------------- */
+  --bg-app: #0b0b0c;
+  --bg-app-gradient: linear-gradient(180deg, #0b0b0c 0%, #0b0b0c 100%);
 
-  /* 歌词页专用色彩 (深色) */
-  --lyrics-overlay-bg: #08090d;
-  --lyrics-overlay-bg-solid: #08090d;
-  --lyrics-text-active: #ffffff;
-  --lyrics-text-inactive: rgba(255, 255, 255, 0.35);
-  --lyrics-text-hover: rgba(255, 255, 255, 0.75);
-  --lyrics-text-unsung: rgba(255, 255, 255, 0.52);
-  --lyrics-trans-active: rgba(255, 255, 255, 0.8);
-  --lyrics-trans-inactive: rgba(255, 255, 255, 0.28);
-  --lyrics-header-text: rgba(255, 255, 255, 0.88);
+  /* 不再有极光与模糊封面铺底 */
+  --ambient-art: none;
+  --ambient-art-opacity: 0;
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+  --aurora-opacity: 0;
+  --aurora-blur: none;
 
-  --text-primary: #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.75);
-  --text-tertiary: rgba(255, 255, 255, 0.48);
-  --text-muted: rgba(255, 255, 255, 0.28);
+  /* 外壳表面（实色，非玻璃） */
+  --glass-rail: #0e0e0f;
+  --glass-dock: #0e0e0f;
+  --glass-chrome: #0b0b0c;
+  --glass-chip: #17171a;
+  --glass-chip-hover: #1f1f23;
+  --glass-stroke: rgba(255, 255, 255, 0.07);
+  --glass-stroke-strong: rgba(255, 255, 255, 0.14);
+
+  /* 内容表面层级（实色） */
+  --surface-0: #101011;
+  --surface-1: #151517;
+  --surface-2: #1b1b1e;
+  --surface-3: #232327;
+  --surface-4: #2c2c31;
+  --surface-sunken: #08080a;
+  --scrim: rgba(0, 0, 0, 0.72);
+  --scrim-soft: rgba(0, 0, 0, 0.5);
+
+  /* 兼容旧名 */
+  --bg-sidebar: var(--glass-rail);
+  --bg-topbar: var(--glass-chrome);
+  --bg-card: var(--surface-1);
+  --bg-card-hover: var(--surface-2);
+  --bg-active: var(--surface-3);
+  --bg-panel: #131315;
+  --bg-panel-solid: #131315;
+  --bg-glass: var(--surface-1);
+  --bg-glass-strong: var(--surface-3);
+  --popover-bg: #17171a;
 
   --border-light: rgba(255, 255, 255, 0.08);
-  --border-subtle: rgba(255, 255, 255, 0.04);
-  --border-focus: rgba(255, 255, 255, 0.25);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-focus: rgba(255, 255, 255, 0.4);
 
-  --accent-primary: #f43f5e;
-  --accent-secondary: #8b5cf6;
-  --accent-gradient: linear-gradient(135deg, #f43f5e 0%, #8b5cf6 100%);
-  --accent-glow: rgba(244, 63, 94, 0.35);
+  --text-primary: #f2f1ee;
+  --text-secondary: rgba(242, 241, 238, 0.72);
+  --text-tertiary: rgba(242, 241, 238, 0.56);
+  /* muted 原来 3.74:1，低于 AA。深色主题抬高 0.08 后约 4.6:1，
+     仍然明显弱于 tertiary，层级不变。 */
+  --text-muted: rgba(242, 241, 238, 0.5);
 
-  --btn-solid-bg: #ffffff;
-  --btn-solid-text: #0c0d12;
-  --btn-solid-hover: #f1f2f6;
+  /* 唯一强调色：暖白。深色主题下"高亮"= 比正文更亮，
+     而不是换一个色相。界面全程中性，注意力由字重与明度承担。 */
+  --accent-primary: #f2f1ee;
+  --accent-secondary: #f2f1ee;
+  --accent-tertiary: #f2f1ee;
+  --accent-text: #f2f1ee;
+  --accent-gradient: linear-gradient(180deg, #f2f1ee 0%, #f2f1ee 100%);
+  --accent-gradient-soft: linear-gradient(180deg, rgba(242, 241, 238, 0.1) 0%, rgba(242, 241, 238, 0.1) 100%);
+  --accent-glow: transparent;
+  --accent-primary-soft: rgba(242, 241, 238, 0.1);
+  --accent-secondary-soft: rgba(242, 241, 238, 0.07);
+  /* 强调色（近白）之上的文字色 */
+  --on-accent: #0b0b0c;
+  /* 主按钮：中性反色（深色底上用近白），不用品牌色 */
+  --btn-solid-bg: #f2f1ee;
+  --btn-solid-text: #0b0b0c;
+  --btn-solid-hover: #dbdad5;
 
-  /* 状态色（语义化） */
-  --color-success: #34c77b;
-  --color-warning: #f5a623;
-  --color-danger: #f43f5e;
+  --color-success: #3ecf8e;
+  --color-success-soft: rgba(62, 207, 142, 0.14);
+  --color-warning: #d9a441;
+  --color-warning-soft: rgba(217, 164, 65, 0.14);
+  --color-danger: #e5484d;
+  --color-danger-soft: rgba(229, 72, 77, 0.14);
+  --color-info: #6b8afd;
+  --color-info-soft: rgba(107, 138, 253, 0.14);
 
-  /* Toast / 提示专用 */
-  --toast-bg: #1b1e2a;
-  --toast-text: #ffffff;
+  /* 覆盖在"自带底色的介质"上的文字色：封面遮罩、危险按钮、二维码遮罩。
+     这些底永远偏深，所以不跟随主题翻转——因此必须走令牌，
+     而不是像以前那样在 12 处各写一个 #fff（浅色主题下容易漏改）。 */
+  --on-media: #fff;
+
+  --toast-bg: #1a1a1d;
+  --toast-text: #f2f1ee;
   --toast-border: rgba(255, 255, 255, 0.1);
-  --toast-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  --toast-shadow: 0 14px 36px rgba(0, 0, 0, 0.5);
 
-  /* 详情 Hero 专用 */
-  --detail-hero-bg: rgba(255, 255, 255, 0.045);
-  --detail-hero-fg: #ffffff;
-  --detail-hero-muted: rgba(255, 255, 255, 0.72);
-  --detail-hero-border: rgba(255, 255, 255, 0.08);
-  --detail-hero-scrim: rgba(0, 0, 0, 0.35);
+  /* 详情页 Hero：中性面板 + 极淡封面染色（由组件注入 --hero-tone） */
+  --detail-hero-bg: #121214;
+  --detail-hero-fg: #f2f1ee;
+  --detail-hero-muted: rgba(242, 241, 238, 0.64);
+  --detail-hero-border: rgba(255, 255, 255, 0.07);
+  --detail-hero-scrim: rgba(0, 0, 0, 0.55);
 
-  /* 层级（集中定义） */
+  --lyrics-overlay-bg: #0b0b0c;
+  --lyrics-overlay-bg-solid: #0b0b0c;
+  --lyrics-text-active: #f2f1ee;
+  --lyrics-text-inactive: rgba(242, 241, 238, 0.58);
+  --lyrics-text-hover: rgba(242, 241, 238, 0.84);
+  --lyrics-text-unsung: rgba(242, 241, 238, 0.62);
+  --lyrics-trans-active: rgba(242, 241, 238, 0.8);
+  --lyrics-trans-inactive: rgba(242, 241, 238, 0.46);
+  --lyrics-header-text: rgba(242, 241, 238, 0.8);
+
+  /* 层级 */
+  --z-ambient: 0;
+  --z-stage: 1;
   --z-topbar: 9;
   --z-sidebar: 10;
-  /* 浮动按钮（定位/回顶部）：低于抽屉遮罩，抽屉打开时自然被盖住 */
   --z-float-btn: 13;
   --z-drawer-overlay: 14;
   --z-drawer: 15;
   --z-player: 20;
   --z-dropdown: 1500;
   --z-lyrics: 1000;
+  --z-drawer-over-lyrics: calc(var(--z-lyrics) + 200);
+  --z-drawer-over-lyrics-panel: calc(var(--z-lyrics) + 201);
   --z-modal: 2000;
   --z-toast: 3000;
   --z-context-menu: 5000;
 
-  /* 焦点环 */
-  --focus-ring: 0 0 0 2.5px var(--accent-glow);
+  /* 焦点：细环 + 极淡外晕，不做粗白框 */
+  --focus-ring-color: rgba(255, 255, 255, 0.55);
+  --focus-ring-halo: rgba(255, 255, 255, 0.1);
+  --focus-ring: 0 0 0 1px var(--focus-ring-color), 0 0 0 3px var(--focus-ring-halo);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.22);
 }
 
-/* 2. 主题：极简皓白 (Clean Ivory - 高对比反色) */
+/* ---------------- 浅色主题：Paper ---------------- */
 [data-theme="light"] {
-  --bg-app: #f4f5f9;
-  --bg-sidebar: rgba(255, 255, 255, 0.88);
-  --bg-topbar: rgba(255, 255, 255, 0.82);
-  --bg-card: rgba(0, 0, 0, 0.035);
-  --bg-card-hover: rgba(0, 0, 0, 0.065);
-  --bg-active: rgba(0, 0, 0, 0.09);
-  --bg-panel: rgba(255, 255, 255, 0.96);
-  --bg-glass: rgba(0, 0, 0, 0.04);
-  --bg-glass-strong: rgba(0, 0, 0, 0.08);
-  --popover-bg: rgba(255, 255, 255, 0.98);
+  color-scheme: light;
+  --bg-app: #f6f5f2;
+  --bg-app-gradient: linear-gradient(180deg, #f6f5f2 0%, #f6f5f2 100%);
+  --ambient-art-opacity: 0;
+  --aurora-opacity: 0;
 
-  --lyrics-overlay-bg: #f5f6fa;
-  --lyrics-overlay-bg-solid: #f5f6fa;
-  --lyrics-text-active: #0f121d;
-  --lyrics-text-inactive: rgba(15, 18, 29, 0.35);
-  --lyrics-text-hover: rgba(15, 18, 29, 0.7);
-  --lyrics-text-unsung: rgba(15, 18, 29, 0.5);
-  --lyrics-trans-active: rgba(15, 18, 29, 0.75);
-  --lyrics-trans-inactive: rgba(15, 18, 29, 0.25);
-  --lyrics-header-text: rgba(15, 18, 29, 0.88);
+  --glass-rail: #fbfaf8;
+  --glass-dock: #fbfaf8;
+  --glass-chrome: #f6f5f2;
+  --glass-chip: #ecebe6;
+  --glass-chip-hover: #e3e2dc;
+  --glass-stroke: rgba(23, 22, 20, 0.08);
+  --glass-stroke-strong: rgba(23, 22, 20, 0.15);
 
-  --text-primary: #11141d;
-  --text-secondary: rgba(17, 20, 29, 0.75);
-  --text-tertiary: rgba(17, 20, 29, 0.5);
-  --text-muted: rgba(17, 20, 29, 0.32);
+  --surface-0: #ffffff;
+  --surface-1: #fbfaf8;
+  --surface-2: #f1f0ec;
+  --surface-3: #e8e7e2;
+  --surface-4: #dedcd6;
+  --surface-sunken: #efeee9;
+  --scrim: rgba(23, 22, 20, 0.42);
+  --scrim-soft: rgba(23, 22, 20, 0.24);
 
-  --border-light: rgba(0, 0, 0, 0.08);
-  --border-subtle: rgba(0, 0, 0, 0.04);
-  --border-focus: rgba(0, 0, 0, 0.2);
+  --bg-panel: #ffffff;
+  --bg-panel-solid: #ffffff;
+  --popover-bg: #ffffff;
 
-  --accent-primary: #e11d48;
-  --accent-secondary: #6366f1;
-  --accent-gradient: linear-gradient(135deg, #e11d48 0%, #6366f1 100%);
-  --accent-glow: rgba(225, 29, 72, 0.22);
+  --border-light: rgba(23, 22, 20, 0.09);
+  --border-subtle: rgba(23, 22, 20, 0.06);
+  --border-strong: rgba(23, 22, 20, 0.18);
+  --border-focus: rgba(23, 22, 20, 0.4);
 
-  --btn-solid-bg: #11141d;
-  --btn-solid-text: #ffffff;
-  --btn-solid-hover: #232736;
+  --shadow-xs: 0 1px 2px rgba(23, 22, 20, 0.06);
+  --shadow-sm: 0 2px 6px rgba(23, 22, 20, 0.07);
+  --shadow-md: 0 6px 18px rgba(23, 22, 20, 0.09);
+  --shadow-lg: 0 12px 32px rgba(23, 22, 20, 0.11);
+  --shadow-float: 0 16px 44px rgba(23, 22, 20, 0.14);
+  --shadow-cover: 0 1px 3px rgba(23, 22, 20, 0.12);
 
-  --color-success: #16a34a;
-  --color-warning: #d97706;
-  --color-danger: #e11d48;
+  --text-primary: #171614;
+  --text-secondary: rgba(23, 22, 20, 0.72);
+  /* tertiary / muted 原来在 #f6f5f2 上只有 4.29:1 / 3.00:1，
+     达不到 WCAG AA 的 4.5:1。浅色主题下"降透明度"对对比度的损耗
+     比深色主题大得多，所以两档都上调了约 0.08。 */
+  --text-tertiary: rgba(23, 22, 20, 0.66);
+  /* muted 在页面底 (#f6f5f2) 上需要 ≥0.60，在侧栏/卡片底
+     (#fbfaf8 / #ffffff) 上也需要 ≥0.59；取 0.62 覆盖全部四种表面。
+     实测：页底 4.85:1、侧栏 4.92:1、白卡 5.00:1。 */
+  --text-muted: rgba(23, 22, 20, 0.62);
+
+  /* 浅色主题的强调同样回到中性：用"更黑的墨色"表示高亮 */
+  --accent-primary: #171614;
+  --accent-secondary: #171614;
+  --accent-tertiary: #171614;
+  --accent-text: #171614;
+  --accent-gradient: linear-gradient(180deg, #171614 0%, #171614 100%);
+  --accent-gradient-soft: linear-gradient(180deg, rgba(23, 22, 20, 0.07) 0%, rgba(23, 22, 20, 0.07) 100%);
+  --accent-glow: transparent;
+  --accent-primary-soft: rgba(23, 22, 20, 0.07);
+  --accent-secondary-soft: rgba(23, 22, 20, 0.05);
+
+  /* 浅色主题 accent 是近黑，其上的文字用白 */
+  --on-accent: #fbfaf8;
+  --btn-solid-bg: #171614;
+  --btn-solid-text: #fbfaf8;
+  --btn-solid-hover: #2c2a26;
+
+  /* 覆盖在"自带深色底"上的文字：浅色主题里也保持白色，
+     因为这些位置永远是遮罩/危险色，不随主题翻转。 */
+  --on-media: #fff;
+
+  --color-success: #0f8a55;
+  --color-success-soft: rgba(15, 138, 85, 0.1);
+  --color-warning: #96650f;
+  --color-warning-soft: rgba(150, 101, 15, 0.1);
+  --color-danger: #b42318;
+  --color-danger-soft: rgba(180, 35, 24, 0.09);
+  --color-info: #2563eb;
+  --color-info-soft: rgba(37, 99, 235, 0.09);
 
   --toast-bg: #ffffff;
-  --toast-text: #11141d;
-  --toast-border: rgba(0, 0, 0, 0.08);
-  --toast-shadow: 0 16px 48px rgba(17, 20, 29, 0.18);
+  --toast-text: #171614;
+  --toast-border: rgba(23, 22, 20, 0.09);
+  --toast-shadow: 0 14px 36px rgba(23, 22, 20, 0.16);
 
-  --detail-hero-bg: rgba(0, 0, 0, 0.035);
-  --detail-hero-fg: #11141d;
-  --detail-hero-muted: rgba(17, 20, 29, 0.72);
-  --detail-hero-border: rgba(0, 0, 0, 0.08);
-  --detail-hero-scrim: rgba(0, 0, 0, 0.18);
+  --detail-hero-bg: #efeee9;
+  --detail-hero-fg: #171614;
+  --detail-hero-muted: rgba(23, 22, 20, 0.64);
+  --detail-hero-border: rgba(23, 22, 20, 0.08);
+  --detail-hero-scrim: rgba(255, 255, 255, 0.5);
+
+  --lyrics-overlay-bg: #f6f5f2;
+  --lyrics-overlay-bg-solid: #f6f5f2;
+  --lyrics-text-active: #171614;
+  --lyrics-text-inactive: rgba(23, 22, 20, 0.62);
+  --lyrics-text-hover: rgba(23, 22, 20, 0.88);
+  --lyrics-text-unsung: rgba(23, 22, 20, 0.66);
+  --lyrics-trans-active: rgba(23, 22, 20, 0.82);
+  --lyrics-trans-inactive: rgba(23, 22, 20, 0.5);
+  --lyrics-header-text: rgba(23, 22, 20, 0.8);
+
+  --focus-ring-color: rgba(23, 22, 20, 0.5);
+  --focus-ring-halo: rgba(23, 22, 20, 0.08);
+  --scrollbar-thumb: rgba(23, 22, 20, 0.2);
 }
 
-/* 全局重置 */
+/* 主题切换：只过渡颜色，不做位移动画。
+   ------------------------------------------------------------
+   旧实现是一张手写选择器清单，问题是：
+     ① 清单里的 .section-card / .setting-row / .list-card 在
+        tsx 里根本没有引用，等于三条空规则；
+     ② 绝大多数容器（.drawer-panel / .popover-menu / .media-card …）
+        各自声明了 transition，后加载的 components.css 会整条覆盖
+        这里的声明，导致"列表在动、浮层瞬变"。
+   现在改为临时开关：切主题时给 <html> 挂 data-theme-transition，
+   220ms 后摘掉（见 useTheme.ts）。这样不依赖任何选择器清单，
+   也不会给常驻状态增加 transition 开销。 */
+html[data-theme-transition='true'] *,
+html[data-theme-transition='true'] *::before,
+html[data-theme-transition='true'] *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow !important;
+  transition-duration: var(--duration-base) !important;
+  transition-timing-function: var(--ease-out) !important;
+}
+
+/* ---------------- 基础重置 ---------------- */
 * {
   margin: 0;
   padding: 0;
@@ -187,16 +424,23 @@
   -webkit-user-drag: none;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+}
+
 body {
   font-family: var(--font-family);
+  font-size: var(--text-md);
   background-color: var(--bg-app);
   color: var(--text-primary);
   overflow: hidden;
-  height: 100vh;
-  width: 100vw;
-  line-height: 1.45;
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-normal);
   -webkit-font-smoothing: antialiased;
-  transition: background-color var(--duration-normal) var(--ease-desktop-out), color var(--duration-normal);
+  text-rendering: optimizeLegibility;
 }
 
 button {
@@ -209,6 +453,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button:focus-visible,
@@ -226,22 +471,50 @@ input {
   background: transparent;
 }
 
-/* 桌面极细顺滑滚动条 */
+img {
+  -webkit-user-drag: none;
+}
+
+::selection {
+  background: var(--accent-primary-soft);
+  color: var(--text-primary);
+}
+
+/* 时间 / 序号统一等宽 */
+.tabular-nums,
+.time-label,
+.song-index-col,
+.song-duration-col,
+.queue-song-time,
+.stat-chip {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* 滚动条：极细、无轨道 */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--scrollbar-thumb);
+  border: 3px solid transparent;
+  background-clip: padding-box;
   border-radius: var(--radius-pill);
-  transition: background var(--duration-micro);
-}
-[data-theme="light"] ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.32);
+  background: color-mix(in srgb, var(--scrollbar-thumb) 70%, var(--text-primary));
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+/* 标准属性兜底：Fluent 滚动条认这两个属性 */
+:root {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+[data-theme='light'] {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }

@@ -33,11 +33,13 @@ export function useThemeSync() {
       const preference = localStorage.getItem('obao-music-theme-preference') ?? 'system';
       if (preference === 'light') theme = 'light';
       else if (preference === 'dark') theme = 'dark';
-      document.documentElement.setAttribute('data-theme', theme);
-      window.musicPlayer.app.setWindowTheme?.({
-        preference: preference as 'system' | 'light' | 'dark',
-        resolvedThemeId: theme === 'light' ? 'white' : 'black'
-      }).catch(() => {});
+      applyThemeAttribute(theme);
+      window.musicPlayer.app.setWindowTheme?.(
+        {
+          preference: preference as 'system' | 'light' | 'dark',
+          resolvedThemeId: theme === 'light' ? 'white' : 'black'
+        }
+      ).catch(() => {});
     };
 
     apply();
@@ -46,10 +48,35 @@ export function useThemeSync() {
   }, []);
 }
 
+/**
+ * 主题切换的过渡开关。
+ * tokens.css 里用 html[data-theme-transition='true'] 给"所有元素"临时挂上
+ * 颜色过渡，摘掉后不留任何常驻 transition —— 因为绝大多数容器都自己声
+ * 明了 transition，靠选择器清单逐个列是列不全的。
+ * 时长与 tokens 的 --duration-base 对齐，多留 40ms 余量避免掐断。
+ */
+let themeTransitionTimer = 0;
+
+function applyThemeAttribute(theme: 'light' | 'dark') {
+  const root = document.documentElement;
+  if (root.getAttribute('data-theme') === theme) return;
+
+  const prefersReduced = root.dataset.reduceEffects === 'true';
+  if (!prefersReduced) {
+    root.setAttribute('data-theme-transition', 'true');
+    window.clearTimeout(themeTransitionTimer);
+    themeTransitionTimer = window.setTimeout(() => {
+      root.removeAttribute('data-theme-transition');
+    }, 260);
+  }
+
+  root.setAttribute('data-theme', theme);
+}
+
 export function setTheme(theme: 'light' | 'dark') {
   const preference = theme === 'light' ? 'light' : 'dark';
   localStorage.setItem('obao-music-theme-preference', preference);
-  document.documentElement.setAttribute('data-theme', theme);
+  applyThemeAttribute(theme);
   window.musicPlayer.app.setWindowTheme?.({
     preference,
     resolvedThemeId: theme === 'light' ? 'white' : 'black'

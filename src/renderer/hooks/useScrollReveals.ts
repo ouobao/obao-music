@@ -28,8 +28,12 @@ export function useScrollReveals(scrollRoot: RefObject<HTMLElement | null>) {
 
     const revealed = new WeakSet<Element>();
 
-    const BATCH_STEP_MS = 220;
-    const MAX_BATCH_DELAY_MS = 1200;
+    /* 批量步进：同屏进入视口的多个区块之间错开的间隔。
+       原来是 220ms / 上限 1200ms —— 首页一屏 19 个 home-section
+       会排出 1.2s 的尾巴，观感是"内容一直在动"。
+       96ms / 上限 384ms 足够读出错峰，又能在 0.4s 内完全静止。 */
+    const BATCH_STEP_MS = 96;
+    const MAX_BATCH_DELAY_MS = 384;
 
     // 创建并持有唯一的 IntersectionObserver
     const io = new IntersectionObserver(

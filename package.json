@@ -20,7 +20,8 @@
     "dist:win:msi": "npm run build && electron-builder --win msi --x64",
     "windows:register-identity": "node scripts/register-windows-identity.cjs",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit"
+    "check:motion": "node scripts/check-motion.cjs",
+    "typecheck": "node scripts/check-motion.cjs && tsc --noEmit && tsc -p tsconfig.node.json --noEmit"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",

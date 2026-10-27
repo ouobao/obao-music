@@ -1,0 +1,711 @@
+/**
+ * 歌词页样式（自 components.css 抽出）
+ * 结构：.lyrics-overlay > 光晕层 + .lyrics-panel(header / main-body(封面列 + 歌词列) / 工具列) + 底部播放条
+ * 依赖 tokens.css 的设计令牌；减弱动效模式见 [data-reduce-effects]。
+ */
+/* 🎼 歌词页面：全新 macOS / iOS 苹果设计语言展开与收起转场 (Apple Sheet Motion) */
+.lyrics-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--lyrics-overlay-bg);
+  z-index: var(--z-lyrics);
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transform: translateY(100%) scale(0.98);
+  /* visibility 不参与过渡：保证激活时立即可见可点，防止动画被冻结时页面“活着但看不见” */
+  transition: transform var(--duration-page) var(--ease-out),
+              opacity 300ms var(--ease-out);
+  overflow: hidden;
+  will-change: transform, opacity;
+}
+
+/* 歌词页背景层：完全不透明纯色遮罩，杜绝透出主页内容 */
+.lyrics-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--lyrics-overlay-bg-solid);
+  pointer-events: none;
+}
+
+.lyrics-overlay > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* 动态背景层已停用。
+   旧版在这里放两团 420–480px 的 blur(70px) 光球 + mix-blend-mode: screen，
+   在浅色主题下变成右下角一团粉紫色雾——这是歌词页最重的"AI 味"残留。
+   歌词页现在是纯中性底，注意力完全交给排版与歌词本身。 */
+.lyrics-overlay .lyrics-dynamic-bg {
+  display: none;
+}
+
+.lyrics-overlay.active {
+  pointer-events: auto;
+  visibility: visible;
+  opacity: 1;
+  animation: lyricsSheetEnter var(--duration-page) var(--ease-emphasized) forwards;
+}
+
+@keyframes lyricsSheetEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(100%) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.lyrics-overlay.lyrics-exiting {
+  pointer-events: none;
+  visibility: visible;
+  animation: lyricsSheetExit var(--duration-page) cubic-bezier(0.32, 0.72, 0, 1) forwards;
+}
+
+@keyframes lyricsSheetExit {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(100%) scale(0.98);
+  }
+}
+
+[data-reduce-effects='true'] .lyrics-overlay,
+[data-reduce-effects='true'] .lyrics-overlay.lyrics-exiting {
+  animation: none;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+[data-reduce-effects='true'] .lyrics-overlay.lyrics-exiting {
+  opacity: 0;
+}
+
+.lyrics-header {
+  flex: 0 0 64px;
+  height: 64px;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  color: var(--lyrics-header-text);
+  position: relative;
+  z-index: 2;
+  box-sizing: border-box;
+  -webkit-app-region: drag;
+  user-select: none;
+  transition: opacity var(--duration-page) var(--ease-out), translate var(--duration-page) var(--ease-out);
+}
+
+.lyrics-header button,
+.lyrics-header a,
+.lyrics-header [role='button'] {
+  -webkit-app-region: no-drag;
+}
+
+.lyrics-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lyrics-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 歌词页右上角窗口控制（最小化/最大化/关闭），贴合歌词页配色 */
+.lyrics-header-actions .window-controls {
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.lyrics-header-actions .window-control-btn {
+  color: var(--lyrics-text-hover);
+}
+
+.lyrics-header-actions .window-control-btn:hover {
+  background: var(--bg-active);
+  color: var(--lyrics-text-active);
+}
+
+.lyrics-header-actions .window-control-btn.window-control-close:hover {
+  background: rgba(244, 63, 94, 0.28);
+  color: var(--on-media);
+}
+
+.lyrics-header-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-pill);
+  /* 幽灵形态：无常驻底色与描边，融入歌词页背景，仅 hover/active 给轻反馈 */
+  background: transparent;
+  border: 1px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lyrics-text-hover);
+  transition: background var(--duration-micro), color var(--duration-micro), border-color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
+}
+
+.lyrics-header-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--lyrics-text-active) 10%, transparent);
+  color: var(--lyrics-text-active);
+}
+
+.lyrics-header-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.lyrics-header-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.lyrics-header-close:hover:not(:disabled) {
+  background: rgba(244, 63, 94, 0.28);
+  color: var(--on-media);
+}
+
+.lyrics-header-btn.active {
+  background: var(--bg-active);
+  color: var(--lyrics-text-active);
+}
+
+/* 歌词工具：平铺面板弹层（译文 / 偏移 / 字号 三段直排） */
+.lyrics-tools-panel {
+  position: fixed;
+  width: 204px;
+  /* 是歌词页里的浮层菜单：只需高于歌词页(1000)与歌词页抽屉(1201)，
+     低于模态框(2000)。原先写死 2000 会和模态框同层。 */
+  z-index: var(--z-dropdown);
+  background: var(--bg-panel-solid);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-float);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* 自己的一套入场，不再借用 .popover-menu 的 popoverMount：
+     那个关键帧随菜单重构已删除，跨文件依赖关键帧很容易在后续改动里
+     静默失效（元素直接出现在最终态）。这里用 panelMount 局部定义。 */
+  animation: lyricsPanelMount var(--duration-fast) var(--ease-spring) both;
+}
+
+@keyframes lyricsPanelMount {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.lyrics-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lyrics-panel-section-label {
+  font-size: var(--text-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.lyrics-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lyrics-panel-segmented {
+  display: flex;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+}
+
+.lyrics-panel-seg-btn {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  transition: background var(--duration-micro), color var(--duration-micro);
+}
+
+.lyrics-panel-seg-btn.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.lyrics-panel-icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: background var(--duration-micro), color var(--duration-micro), border-color var(--duration-micro);
+}
+
+.lyrics-panel-icon-btn:hover:not(:disabled) {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border-color: var(--border-focus);
+}
+
+.lyrics-panel-value {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-card);
+  border: 1px solid transparent;
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: border-color var(--duration-micro), color var(--duration-micro);
+}
+
+.lyrics-panel-value:hover {
+  border-color: var(--border-light);
+  color: var(--text-primary);
+}
+
+.lyrics-panel-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 1px 0;
+}
+
+.lyrics-overlay.chrome-hidden .lyrics-header {
+  /* 保留 1/3 可见度：沉浸态仍能看到返回/菜单，不会像"卡在全屏页" */
+  opacity: 0.34;
+  pointer-events: auto;
+  translate: 0 0;
+}
+
+[data-reduce-effects='true'] .lyrics-overlay.chrome-hidden .lyrics-header {
+  translate: none;
+}
+
+.lyrics-main-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  /* 封面列按内容宽度收窄，避免 240px 封面被塞进 380px 列里、
+     与歌词列之间出现 160px 的视觉空洞 */
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 40px;
+  /* 底部给绝对定位的 .lyrics-playerbar 让位（24px 底距 + ~86px 高），
+     否则最后几行歌词会滚到播放条下方被遮住。 */
+  padding: 0 48px 118px;
+  overflow: hidden;
+  position: relative;
+  z-index: 2;
+}
+
+/* 注意：歌词页在 chrome-hidden 下仍会显示全局播放坞（fixed），
+   所以底部必须一直保留 118px 让位；收掉会让最后几行歌词被坞盖住。 */
+
+/* 静态大气高端大封面 layout */
+.lyrics-artwork-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.lyrics-big-cover-anchor {
+  width: fit-content;
+  height: fit-content;
+  display: block;
+  transition: transform var(--duration-page) var(--ease-out), opacity var(--duration-base) ease;
+}
+
+[data-reduce-effects='true'] .lyrics-big-cover-anchor {
+  transition: none;
+}
+
+.lyrics-big-cover {
+  width: clamp(220px, 26vh, 280px);
+  height: clamp(220px, 26vh, 280px);
+  border-radius: var(--radius-md);
+  /* 只保留一层极淡投影，不再加 1px 描边环 */
+  box-shadow: var(--shadow-cover);
+  object-fit: cover;
+  /* 封面载体：--song-cover-image 由组件注入（url(...)），--cover-tone 兜底渐变 */
+  background: var(--song-cover-image), var(--cover-tone);
+  background-position: center;
+  background-size: cover;
+}
+
+/* 切歌过渡：骨架占位 + 内容淡入 */
+.lyrics-lines-skeleton {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  align-self: stretch;
+  flex: 1;
+  padding-inline: 24px;
+  pointer-events: none;
+}
+
+.lyrics-meta-skeleton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-block: 4px;
+}
+
+.lyrics-content-enter {
+  animation: lyricsContentIn var(--duration-page) var(--ease-out) both;
+}
+
+@keyframes lyricsContentIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 切歌时大封面轻微浮现 */
+.lyrics-cover-enter {
+  animation: lyricsCoverIn var(--duration-page) var(--ease-out) both;
+}
+
+@keyframes lyricsCoverIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (max-width: 920px) {
+  .lyrics-main-body {
+    grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.25fr);
+    gap: 20px;
+    padding-inline: 28px;
+  }
+
+  .lyrics-big-cover {
+    width: 220px;
+    height: 220px;
+  }
+
+  .lyrics-header {
+    padding-inline: 18px;
+  }
+}
+
+@media (max-height: 700px) {
+  .lyrics-big-cover {
+    width: 220px;
+    height: 220px;
+  }
+
+  .lyrics-artwork-container {
+    gap: 14px;
+  }
+}
+
+/* 歌词滚动区：纵向排布，工具条作为右上角悬浮玻璃胶囊浮在滚动区上方 */
+.lyrics-scroll-zone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  /* 兜底裁切：滚动容器在某些 flex 组合下会按内容撑高，
+     把最后几行歌词推到播放坞下方；这里裁掉溢出部分。 */
+  overflow: hidden;
+}
+
+/* 歌词滚动区外衬：歌词行自带距离透明度/虚化，容器自然裁切，
+   不再叠加上下边缘的“羽化遮罩” —— 遮罩会随滚动持续压在歌词上，
+   造成白底/虚化盖住歌词、难以看清 */
+.lyrics-scroll-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  /* 裁掉滚动容器超出 wrap 的部分：container 的 max-height:100% 在 flex
+     子项上不生效，会溢出 118px 到播放坞下方，必须由父级兜底裁切。 */
+  overflow: hidden;
+}
+
+.lyrics-scroll-container {
+  /* 恢复常规流布局；溢出部分由父级 .lyrics-scroll-zone 的 overflow:hidden
+     裁掉（绝对定位的 inset 会相对 main-body 的 padding box 解析成 716px，
+     反而把最后几行推到播放坞下方）。 */
+  position: relative;
+  height: 100%;
+  max-height: 100%;
+  /* 必须显式占满 .lyrics-scroll-wrap（横向 flex）的宽度：
+     容器内唯一子元素 .lyrics-virtual-space 的歌词行全部绝对定位，
+     max-content 宽度为 0，若只写 min-width:0 容器会塌陷成 0px，
+     导致每行歌词竖排成一个字一行（歌词页整片空白）。 */
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  align-self: stretch;
+  /* 作为歌词行的 offsetParent，保证 offsetTop/居中计算在内容坐标系内 */
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  /* 上下留白必须等于锚点比例（0.44 上 / 0.56 下），否则首尾几行永远滚不到
+     锚点位置、最后一屏歌词贴不到中线。具体数值由 LyricsPanel 用
+     getLyricAnchorSpaces(viewportHeight) 写入，避免和 JS 的比例各写一套。 */
+  padding: var(--lyrics-pad-head, 200px) 0 var(--lyrics-pad-tail, 240px) 0;
+  /* 不透明度/缩放即可完成边缘羽化的视觉；不使用 mask-image，
+     避免软渲染下 mask+blur 组合层造成 GPU/合成器崩溃 */
+  /* 注意：不能设 scroll-behavior: smooth——rAF 逐帧写 scrollTop 会被其
+     拦截成平滑动画，产生滚动滞后/粘滞（行切换滚动不跟手主因） */
+}
+
+/* 歌词页是沉浸式表面，不能出现滚动条。
+   Win11 的 Fluent 滚动条会忽略 ::-webkit-scrollbar，必须同时用标准属性。 */
+.lyrics-scroll-container {
+  scrollbar-width: none;
+}
+
+.lyrics-scroll-container::-webkit-scrollbar {
+  display: none;
+}
+
+/* 用户手动滚动浏览时：取消逐行模糊，保证歌词清晰可读 */
+.lyrics-scroll-container.user-scrolling .lyric-line {
+  filter: none !important;
+}
+
+.lyric-line {
+  position: relative;
+  font-size: calc(20px * var(--lyrics-scale, 1));
+  font-weight: var(--font-weight-regular);
+  letter-spacing: 0;
+  color: var(--lyrics-text-inactive);
+  padding: 7px 14px;
+  /* 注意：filter 不参与过渡动画（软渲染下逐帧 blur 极易卡死/崩溃），
+     所以逐行模糊全部取消，只靠颜色与不透明度表达距离。 */
+  transition: color var(--duration-base) var(--ease-out), opacity var(--duration-base) var(--ease-out), font-size var(--duration-base) var(--ease-out);
+  cursor: pointer;
+  white-space: normal;
+  word-break: break-word;
+  max-width: 94%;
+  opacity: 0.62;
+  transform: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: var(--radius-sm);
+}
+
+/* 非激活行的 hover 反馈：轻微提亮 + 极淡底，提示可点击跳转 */
+.lyric-line:not(.active):hover {
+  color: var(--lyrics-text-hover);
+  opacity: 0.82;
+  background: color-mix(in srgb, var(--lyrics-text-active) 4%, transparent);
+}
+
+.lyric-hover-play-btn {
+  opacity: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  color: var(--bg-app);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity var(--duration-base) ease;
+  flex-shrink: 0;
+}
+
+.lyric-line:hover .lyric-hover-play-btn {
+  opacity: 1;
+}
+
+.lyric-text-content {
+  flex: 1;
+  letter-spacing: -0.2px;
+}
+
+/* 旧版歌词行文本容器。
+   不要再写 display：与 global.css 的 .lyric-line-text{display:inline-grid}
+   冲突，只靠 @import 顺序决定胜负，一旦顺序变化逐字卡拉OK的双层 grid-area 叠放就会失效。 */
+.lyric-line-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 旧版译文样式 */
+.lyrics-translation-text {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-regular);
+  color: var(--lyrics-trans-inactive);
+  margin-top: 5px;
+}
+
+/* 距离当前行越远，只降不透明度——不做逐行 blur 景深。
+   旧版 near/far 各档带 blur(0.4–1.3px)，在软渲染下既费性能，
+   又让"看得清歌词"这个核心诉求打折扣。 */
+.lyric-line.near-1 {
+  opacity: 0.86;
+  color: var(--lyrics-text-hover);
+}
+
+.lyric-line.near-2 {
+  opacity: 0.74;
+  color: var(--lyrics-text-hover);
+}
+
+/* 当前行：略大一号 + 加重，不做 33px 的巨大跳变和光晕 */
+.lyric-line.active {
+  font-size: calc(24px * var(--lyrics-scale, 1));
+  font-weight: var(--font-weight-semibold);
+  opacity: 1;
+  color: var(--lyrics-text-active);
+  text-shadow: none;
+}
+
+.lyric-line.far-1 {
+  opacity: 0.6;
+  color: var(--lyrics-text-inactive);
+}
+
+.lyric-line.far-2 {
+  opacity: 0.44;
+  color: var(--lyrics-text-inactive);
+}
+
+/* 浅色底上 alpha 会再乘一次 opacity，远处歌词需要额外提亮才能保持可读 */
+[data-theme='light'] .lyric-line.far-1 {
+  opacity: 0.82;
+}
+
+[data-theme='light'] .lyric-line.far-2 {
+  opacity: 0.7;
+}
+
+[data-reduce-effects='true'] .lyric-line.far-1,
+[data-reduce-effects='true'] .lyric-line.far-2 {
+  filter: none;
+}
+
+.lyric-translation {
+  font-size: var(--text-lg);
+  font-weight: var(--font-weight-regular);
+  color: var(--lyrics-trans-inactive);
+  margin-top: 6px;
+}
+
+.lyric-line.active .lyric-translation {
+  color: var(--lyrics-trans-active);
+  font-weight: var(--font-weight-regular);
+}
+
+/* 歌词页完整播放底栏 */
+.lyrics-playerbar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 10px 22px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-panel-solid);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-float);
+  z-index: 3;
+  max-width: min(820px, calc(100vw - 48px));
+  transition: opacity var(--duration-page) var(--ease-out), translate var(--duration-page) var(--ease-out);
+}
+
+.lyrics-playerbar-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+}
+
+.lyrics-playerbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.lyrics-overlay.chrome-hidden .lyrics-playerbar {
+  opacity: 0;
+  pointer-events: none;
+  translate: -50% 130%;
+}
+
+[data-reduce-effects='true'] .lyrics-overlay.chrome-hidden .lyrics-playerbar {
+  translate: -50% 0;
+}
+
+@media (max-width: 720px) {
+  .lyrics-playerbar {
+    gap: 14px;
+    padding: 10px 14px;
+  }
+
+  /* 小屏歌词页播放栏：隐藏音量滑块（保留静音按钮），避免与进度条挤压 */
+  .lyrics-playerbar .volume-slider {
+    display: none;
+  }
+}

@@ -1,349 +1,396 @@
 /**
- * 现代轻量化组件样式系统 (Components)
- * 重构说明：
- * 1. 解决导航 hover 位移多余
- * 2. 搜索框聚焦极致美化与展示层强化
- * 3. 彻底消除位移放大造成的模糊 (改用 GPU will-change 与 opacity/shadow)
- * 4. 统一模态框/抽屉的高斯模糊半径为 28px/40px
- * 5. 歌词沉浸过渡 (620ms Apple Spring) 与逐行梯度模糊 (Distance-based Blur)
- * 6. 播放队列精致设计 (包含专辑封面与软分隔符)
+ * Stage v4 · 组件样式（悬浮外壳 / 列表 / 抽屉 / 菜单 / 弹窗 / 提示）
+ * ---------------------------------------------------------------
+ * 架构说明：
+ *   .app-layout          只做定位容器（100vw × 100vh，overflow hidden）
+ *   .app-ambient         全幅画布：当前封面模糊铺底 + 三团极光 + 颗粒
+ *   .titlebar-drag       顶部拖拽条（真实元素，避免与悬浮控件抢事件）
+ *   .sidebar             悬浮玻璃导航卡（左侧，四周留白）
+ *   .topbar              透明控制层（指针穿透，仅胶囊簇接收事件）
+ *   .main-content        内容滚动舞台（上/下留出悬浮层高度）
+ *   .playerbar           悬浮玻璃播放坞（底部通栏，圆角独立）
+ *
+ * 组件顺序：1 画布 → 2 侧边栏 → 3 顶栏 → 4 舞台与浮钮 → 5 播放坞
+ *           → 6 抽屉 → 7 菜单 → 8 Toast 与弹窗体系 → 9 按钮 → 10 封面
  */
 
-/* 布局骨架 (3区域网格) */
+/* ============================================================
+   1. 定位容器与全幅画布
+   ============================================================ */
 .app-layout {
-  display: grid;
-  grid-template-columns: 210px 1fr;
-  grid-template-rows: 56px 1fr 76px;
-  grid-template-areas:
-    "sidebar topbar"
-    "sidebar content"
-    "player  player";
+  position: relative;
   height: 100vh;
   width: 100vw;
-  position: relative;
   overflow: hidden;
+  background: var(--bg-app);
+  isolation: isolate;
+  /* 注意：这里不要写 transition: --rail-width。
+     --rail-width 没有 @property 注册，属于离散属性，过渡不会生效；
+     而且 --stage-left 由它 calc() 派生，也无法插值。
+     折叠动画实际由 .sidebar 的 width 与 .main-content 的 left 各自过渡完成。 */
+}
+
+.app-ambient {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-ambient);
+  overflow: hidden;
+  pointer-events: none;
   background: var(--bg-app);
 }
 
-@media (max-width: 1100px) {
-  .app-layout {
-    grid-template-columns: 190px 1fr;
-    grid-template-rows: 52px 1fr 72px;
-  }
+/* 旧版的"封面模糊铺底 + 三团极光 + 颗粒"已全部移除：
+   它们会让整个界面蒙上一层彩色雾，是"AI 味"最重的来源。
+   现在画布是纯中性底色，颜色只来自专辑封面本身。 */
+.app-ambient::before,
+.app-ambient::after,
+.app-ambient > .aurora-veil,
+.app-ambient > .aurora-grain {
+  display: none;
 }
 
-/* 折叠侧边栏：左列收窄，文本类元素淡出隐藏，只留图标导航 */
-.app-layout {
-  transition: grid-template-columns var(--duration-page) var(--ease-desktop-out);
+/* 顶部拖拽条：只有这条真实元素负责拖动窗口 */
+/* 顶部拖拽条：只覆盖顶栏的"空白"区域，绝不压住任何可点控件。
+   ------------------------------------------------------------
+   原来的实现是一条 0,0 / 全宽 / 32px 的 absolute 层，
+   而顶栏高 56px —— 它正好盖住顶栏上半部分的所有按钮，
+   Electron 的原生拖拽区在 DOM 命中测试之外拦截鼠标，
+   表现就是"每个顶部按钮只有下半截能点"。
+   现在改为：
+     1. 高度收窄到 8px（只覆盖按钮上方的一点空隙）
+     2. 从侧栏右缘开始（不盖住侧栏品牌头，那里自己已经是拖拽区）
+     3. pointer-events: none —— 不参与 DOM 事件，
+        拖拽由 -webkit-app-region 在原生层处理 */
+.titlebar-drag {
+  position: absolute;
+  top: 0;
+  left: var(--stage-left);
+  right: 0;
+  height: 8px;
+  z-index: calc(var(--z-topbar) - 1);
+  pointer-events: none;
+  -webkit-app-region: drag;
 }
 
+/* 侧边栏折叠时收窄舞台；变量切换由 .app-layout 上的类驱动 */
 .app-layout.sidebar-collapsed {
-  grid-template-columns: 64px 1fr;
-}
-
-@media (max-width: 1100px) {
-  .app-layout.sidebar-collapsed {
-    grid-template-columns: 60px 1fr;
-  }
+  --rail-width: var(--rail-width-collapsed);
+  /* --stage-left 在 :root 上用根级 --rail-width 算好了，
+     子元素覆盖 --rail-width 不会让 :root 的 calc 重算 —— 必须在这里重新定义，
+     否则侧栏收窄到 78px 后主内容仍停在 284px，右半边全空。 */
+  --stage-left: calc(var(--rail-inset) + var(--rail-width-collapsed) + var(--chrome-gap));
 }
 
 .app-layout.sidebar-collapsed .sidebar-brand-text,
 .app-layout.sidebar-collapsed .nav-item-label,
 .app-layout.sidebar-collapsed .nav-group-title,
 .app-layout.sidebar-collapsed .sidebar-playlist-section,
-.app-layout.sidebar-collapsed .playlist-nav-title {
-  opacity: 0;
-  pointer-events: none;
-  width: 0;
-  height: 0;
-  overflow: hidden;
+.app-layout.sidebar-collapsed .playlist-nav-item,
+.app-layout.sidebar-collapsed .rail-footer {
+  display: none;
 }
 
-/* 折叠时品牌区收缩为居中徽标，汉堡按钮保持可点以便展开 */
-.app-layout.sidebar-collapsed .brand-logo {
-  gap: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.app-layout.sidebar-collapsed .sidebar-header {
-  padding-inline: 4px;
+.app-layout.sidebar-collapsed .sidebar {
+  padding: 14px 10px;
 }
 
 .app-layout.sidebar-collapsed .nav-item {
-  justify-content: center;
+  height: 46px;
   padding: 0;
+  justify-content: center;
 }
 
 .app-layout.sidebar-collapsed .nav-item-icon {
   margin-right: 0;
 }
 
-.app-layout.sidebar-collapsed .playlist-nav-item {
+.app-layout.sidebar-collapsed .sidebar-header {
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 10px;
   justify-content: center;
-  gap: 0;
-  padding: 6px 0;
 }
 
-/* 侧边栏 (Sidebar) */
+/* ============================================================
+   2. 侧边栏（贴边平面板 + 右侧发丝分隔线）
+   ============================================================ */
 .sidebar {
-  grid-area: sidebar;
-  background: var(--bg-sidebar);
-  border-right: 1px solid var(--border-light);
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--rail-width);
+  z-index: var(--z-sidebar);
   display: flex;
   flex-direction: column;
-  z-index: 10;
-  padding: 12px 8px;
-  position: relative;
+  gap: 2px;
+  padding: 14px 10px 12px;
+  border-radius: 0;
+  background: var(--glass-rail);
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  box-shadow: none;
   overflow: hidden;
+  transition: width var(--duration-page) var(--ease-out), background-color var(--duration-base) var(--ease-out);
 }
 
-/* 毛玻璃层独立于拖拽区域（避免 backdrop-filter 祖先破坏 app-region drag） */
-.sidebar::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  backdrop-filter: var(--blur-overlay);
-  -webkit-backdrop-filter: var(--blur-overlay);
-  z-index: 0;
-  pointer-events: none;
-}
-
-.sidebar > * {
-  position: relative;
-  z-index: 1;
-}
-
+/* 品牌头 */
 .sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 6px 14px 6px;
-  min-height: 42px;
+  gap: 8px;
+  padding: 0 6px 14px;
   -webkit-app-region: drag;
-  user-select: none;
 }
 
-.sidebar-header button,
-.sidebar-header [role='button'] {
+.sidebar-header button {
   -webkit-app-region: no-drag;
-}
-
-/* 侧边栏折叠按钮（汉堡菜单） */
-.sidebar-toggle-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-tertiary);
-  transition: background var(--duration-micro), color var(--duration-micro);
-  flex-shrink: 0;
-}
-
-.sidebar-toggle-btn:hover {
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
 }
 
 .brand-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-weight: var(--font-weight-bold);
-  font-size: 17px;
-  letter-spacing: 1.5px;
-  color: var(--text-primary);
+  gap: 11px;
+  min-width: 0;
   white-space: nowrap;
-}
-
-/* 品牌名：简洁清爽的无衬线，纯色而非渐变文字，避免廉价感 */
-.sidebar-brand-text {
-  font-family: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", "PingFang SC", "Microsoft YaHei", "Microsoft YaHei UI", sans-serif;
-  font-size: 16px;
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 1px;
-  color: var(--text-primary);
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 .logo-badge {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  box-shadow: 0 3px 12px var(--accent-glow);
-  flex-shrink: 0;
-  -webkit-user-drag: none;
-  user-select: none;
-}
-
-.logo-badge img {
-  width: 100%;
-  height: 100%;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
   object-fit: cover;
+  flex-shrink: 0;
   display: block;
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--aurora-a) 22%, transparent), inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  transition: transform var(--duration-base) var(--ease-emphasized);
 }
 
+/* 品牌标不做缩放：静态标识的 hover 变形没有信息增量，
+   还会让侧栏左上角这块"最稳"的区域跟着呼吸。只保留光标反馈。 */
+
+.sidebar-brand-text {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--tracking-snug);
+  color: var(--text-primary);
+}
+
+.sidebar-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: background-color var(--duration-micro), color var(--duration-micro);
+}
+
+.sidebar-toggle-btn:hover {
+  background: var(--glass-chip);
+  color: var(--text-primary);
+}
+
+.sidebar-toggle-btn:active {
+  background: var(--glass-chip-hover);
+}
+
+/* 分组标题 */
 .nav-group-title {
   display: flex;
   align-items: center;
-  font-size: 10.5px;
+  gap: 8px;
+  padding: 14px 10px 7px;
+  font-size: var(--text-2xs);
   font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-muted);
-  padding: 10px 8px 4px 8px;
-  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
   white-space: nowrap;
 }
 
+.nav-group-count {
+  margin-left: auto;
+  font-size: var(--text-2xs);
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+
+/* 主导航 */
 .nav-menu {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
 }
 
-/* 🎯 修正点8：移除多余的 translateX 位移，采用纯粹精致的背景与色彩微亮过渡 */
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
   height: 38px;
   padding: 0 10px;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: var(--font-weight-regular);
-  transition: background-color var(--duration-micro) ease, color var(--duration-micro) ease;
-  text-decoration: none;
-  position: relative;
+  letter-spacing: 0;
   white-space: nowrap;
   text-align: left;
+  transition: background-color var(--duration-micro) var(--ease-out), color var(--duration-micro);
 }
 
 .nav-item-icon {
-  width: 22px;
-  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
   margin-right: 10px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: color var(--duration-micro);
 }
 
-.nav-item-icon svg {
-  flex-shrink: 0;
-  display: block;
+.nav-item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-item:hover {
-  background: var(--bg-card-hover);
+  background: var(--glass-chip);
   color: var(--text-primary);
 }
 
-.nav-item.active {
-  background: var(--bg-active);
+.nav-item:hover .nav-item-icon {
   color: var(--text-primary);
-  font-weight: var(--font-weight-semibold);
+}
+
+.nav-item:active {
+  background: var(--glass-chip-hover);
+}
+
+/* 激活项：中性填充 + 左侧 2px 琥珀指示条。
+   不再用整颗渐变胶囊——那是"AI 味"最重的元素之一。 */
+.nav-item.active {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-weight: var(--font-weight-medium);
+  box-shadow: none;
+}
+
+.nav-item.active .nav-item-icon {
+  color: var(--accent-primary);
 }
 
 .nav-item.active::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 22%;
-  height: 56%;
-  width: 3px;
+  top: 50%;
+  width: 2px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 1px;
   background: var(--accent-primary);
-  border-radius: 0 3px 3px 0;
 }
 
-/* 侧边栏歌单列表区域 */
+/* 歌单列表 */
 .sidebar-playlist-section {
-  margin-top: 10px;
   flex: 1;
+  min-height: 0;
+  margin-top: 2px;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
+  gap: 8px;
   overflow-y: auto;
   overflow-x: hidden;
-  transition: opacity var(--duration-micro);
+  overscroll-behavior: contain;
+  /* 原生 Fluent 滚动条在侧栏里很突兀，改用滚轮/触控板；
+     但完全隐藏会让"还能往下滚"失去提示，
+     所以底部留 16px 渐隐（见下方 mask）。 */
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
+  /* 底部 16px 淡出：滚动到底时由 JS 摘掉该类（见 Sidebar.tsx） */
+  mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 18px), transparent 100%);
+  transition: mask-image var(--duration-micro);
+}
+
+/* 已滚到底：取消渐隐，最后一项完整可见 */
+.sidebar-playlist-section.is-at-end {
+  mask-image: none;
+}
+
+
+.sidebar-playlist-section::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .sidebar-playlist-group {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
+  gap: 3px;
   flex-shrink: 0;
+}
+
+/* 歌单区可滚动：标题不再使用 sticky 背景带——浅色主题下那条纯白横条
+   会在玻璃侧栏里像一张贴纸。标题随列表滚走，由上方主导航保持上下文。 */
+.sidebar-playlist-section .nav-group-title {
+  position: static;
+  background: transparent;
 }
 
 .sidebar-playlist-list {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
   gap: 2px;
-  width: 100%;
 }
 
 .playlist-nav-item {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
+  gap: 11px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 6px 10px;
   border-radius: var(--radius-md);
-  font-size: 12.5px;
   color: var(--text-secondary);
-  transition: background var(--duration-micro) var(--ease-desktop-out), color var(--duration-micro);
+  font-size: var(--text-sm);
   white-space: nowrap;
   overflow: hidden;
-  cursor: pointer;
   text-align: left;
+  transition: background var(--duration-micro) var(--ease-out), color var(--duration-micro);
 }
 
 .playlist-nav-item:hover {
-  background: var(--bg-card-hover);
+  background: var(--glass-chip);
   color: var(--text-primary);
 }
 
 .playlist-nav-item.active {
-  background: var(--bg-active);
+  background: var(--glass-chip-hover);
   color: var(--text-primary);
   font-weight: var(--font-weight-semibold);
 }
 
 .playlist-nav-cover {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
   object-fit: cover;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.9);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-xs), inset 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
-/* 无封面歌单：不加载任何默认图，仅显示克制的中性占位 */
 .playlist-nav-cover-empty {
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-}
-
-.nav-group-count {
-  margin-left: auto;
-  font-size: 10.5px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
+  background: var(--glass-chip);
 }
 
 .playlist-nav-title {
@@ -354,40 +401,239 @@
   text-align: left;
 }
 
+.sidebar-playlist-subtitle {
+  /* 横向内距与 .nav-group-title 对齐（同为 10px），
+     否则同一列里的分组标题会左右错开 2px */
+  padding: 10px 10px 3px;
+  font-size: var(--text-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.sidebar-empty-note {
+  margin: 4px 2px;
+  padding: 14px 12px;
+  border: 1px dashed var(--glass-stroke-strong);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* 空歌单：把原来"虚线大框 + 底部登录卡"的两段空场合并成一张紧凑卡，
+   登录入口只在这里出现一次，不再和顶栏登录重复。 */
+.sidebar-playlist-section.is-empty .sidebar-playlist-group {
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar-playlist-section.is-empty .sidebar-playlist-list {
+  /* 必须撑满剩余高度，justify-content: center 才会真的把空态放在
+     歌单区的垂直中间；否则列表只有内容高度，空态会贴着顶部。 */
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+}
+
+.sidebar-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 8px 16px;
+  text-align: center;
+}
+
+.sidebar-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
+}
+
+.sidebar-empty-title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+
+.sidebar-empty-desc {
+  max-width: 180px;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+
+.sidebar-empty-action {
+  margin-top: 2px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--border-strong);
+  transition: color var(--duration-micro), text-decoration-color var(--duration-micro);
+}
+
+.sidebar-empty-action:hover {
+  color: var(--text-primary);
+  text-decoration-color: currentColor;
+}
+
 .sidebar-playlist-skeleton {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 4px 0;
+  gap: 10px;
+  padding: 6px 10px;
 }
 
 .sidebar-playlist-skeleton-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 8px;
+  gap: 10px;
 }
 
-/* 侧边栏导航项：与歌曲列表一致的“整条 item 模糊淡入”，按 DOM --i 有序出现
-   （而不是此前仅封面图片无序模糊淡入） */
+/* 侧边栏底部：登录 CTA / 账号卡 */
+.rail-footer {
+  flex-shrink: 0;
+  padding-top: 10px;
+  margin-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.rail-cta {
+  position: relative;
+  display: flex;
+  padding: 14px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.rail-cta-title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.rail-cta-desc {
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+  color: var(--text-tertiary);
+}
+
+.rail-cta-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.rail-cta-btn {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-text);
+  font-size: var(--text-xs);
+  font-weight: var(--font-weight-medium);
+  transition: background-color var(--duration-micro);
+}
+
+.rail-cta-btn:hover {
+  background: var(--btn-solid-hover);
+}
+
+.rail-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  transition: background var(--duration-micro);
+}
+
+.rail-user:hover {
+  background: var(--glass-chip);
+}
+
+.rail-user-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-gradient);
+  color: var(--on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-bold);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.rail-user-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.rail-user-name {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-user-sub {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+/* 矮窗口：收起登录引导卡的说明文案，把高度还给歌单列表。
+   720px 高时侧边栏里"我的歌单"只剩 70 多像素，列表根本不可用；
+   设计约束要求 960×680 下仍然可用，所以这里做一次降级。 */
+@media (max-height: 780px) {
+  .rail-footer {
+    padding-top: 8px;
+    margin-top: 4px;
+  }
+
+  .rail-cta {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .rail-cta-desc {
+    display: none;
+  }
+}
+
+/* 侧边栏入场：按序错峰浮现 */
 .sidebar .nav-item,
 .sidebar .playlist-nav-item {
-  animation: itemBlurIn 360ms var(--ease-desktop-out) backwards;
-  animation-delay: calc(var(--i, 0) * 40ms);
-}
-
-.sidebar .playlist-nav-item .playlist-nav-cover {
-  transition-delay: calc(var(--i, 0) * 28ms);
-}
-
-/* 侧边栏歌单子分组：网易云“我创建的 / 我收藏的”分隔标题 */
-.sidebar-playlist-subtitle {
-  font-size: 10.5px;
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.3px;
-  color: var(--text-tertiary);
-  padding: 9px 8px 3px 8px;
-  white-space: nowrap;
+  animation: itemBlurIn var(--duration-page) var(--ease-emphasized) backwards;
+  animation-delay: calc(min(var(--i, 0), var(--stagger-cap)) * var(--stagger-step));
 }
 
 [data-reduce-effects='true'] .sidebar .nav-item,
@@ -395,190 +641,270 @@
   animation: none;
 }
 
-/* 顶栏 (TopBar) */
+/* ============================================================
+   3. 顶栏（平面工具条，左侧让开侧栏，底部发丝线）
+   ============================================================ */
 .topbar {
-  grid-area: topbar;
-  background: var(--bg-topbar);
-  backdrop-filter: var(--blur-overlay);
-  -webkit-backdrop-filter: var(--blur-overlay);
-  border-bottom: 1px solid var(--border-light);
+  position: fixed;
+  top: 0;
+  left: var(--stage-left);
+  right: 0;
+  height: var(--chrome-top);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
-  z-index: 9;
-  -webkit-app-region: drag;
+  gap: var(--space-5);
+  padding: 0 16px;
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border-subtle);
+  pointer-events: none;
   user-select: none;
+  z-index: var(--z-topbar);
+  transition: left var(--duration-page) var(--ease-out);
+  /* 注意：这里刻意不设 -webkit-app-region: drag。
+     顶栏整条设为 drag 时，即使子元素声明 no-drag，
+     Electron 在部分版本上仍会优先应用父级区域，
+     表现为顶栏所有按钮只有下半截能点。
+     窗口拖动统一交给下面那条 8px 的 .titlebar-drag。 */
 }
 
+/* 顶栏内所有交互元素显式豁免拖拽（防御性声明） */
+.topbar-left,
+.topbar-right,
 .topbar button,
-.topbar input,
 .topbar a,
+.topbar input,
 .topbar [role='button'],
-.topbar .search-dropdown,
-.topbar .search-capsule,
 .topbar .provider-toggle,
-.topbar .nav-history-controls,
+.topbar .search-input-wrapper,
 .topbar .user-profile-badge,
 .topbar .window-controls {
   -webkit-app-region: no-drag;
 }
 
-
-.topbar-left {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-width: 0;
-  flex: 1;
+/* 顶栏不再是透明覆盖层，滚动内容不会透到上面：
+   这条渐变遮罩已无存在意义，保留选择器但清空绘制。 */
+.topbar::before {
+  display: none;
 }
 
+.topbar-left,
+.topbar-right {
+  position: relative;
+  /* 高于侧边栏，使搜索下拉 / 用户菜单不被侧边栏裁切 */
+  z-index: calc(var(--z-sidebar) + 1);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  pointer-events: auto;
+}
+
+.topbar-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.topbar-right {
+  flex-shrink: 0;
+}
+
+/* 历史前进/后退：玻璃胶囊组 */
 .nav-history-controls {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-chip);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--shadow-sm);
   flex-shrink: 0;
 }
 
 .history-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
   color: var(--text-secondary);
-  transition: background var(--duration-micro), color var(--duration-micro);
+  transition: background var(--duration-micro), color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
 }
 
 .history-btn:hover:not(:disabled) {
-  background: var(--bg-card-hover);
+  background: var(--glass-chip-hover);
   color: var(--text-primary);
 }
 
-/* 🎯 修正点10：重新设计的优雅极简搜索框与搜索下拉面板 */
+.history-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.history-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* 搜索：宽胶囊，聚焦时扩张并点亮 */
 .search-capsule {
   position: relative;
-  width: clamp(200px, 24vw, 260px);
+  width: clamp(260px, 30vw, 380px);
+  min-width: 180px;
   flex-shrink: 1;
-  min-width: 160px;
-  transition: width var(--duration-normal) var(--ease-desktop-out);
+  transition: width var(--duration-base) var(--ease-out);
 }
 
 .search-capsule:focus-within {
-  width: clamp(250px, 30vw, 320px);
+  width: clamp(320px, 36vw, 460px);
 }
 
 .search-input-wrapper {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
+  gap: 10px;
+  height: 40px;
+  padding: 0 18px;
   border-radius: var(--radius-pill);
-  padding: 6px 14px;
-  transition: background var(--duration-micro), border-color var(--duration-micro), box-shadow var(--duration-micro);
+  background: var(--glass-chip);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-tertiary);
+  transition: background var(--duration-micro), border-color var(--duration-micro), box-shadow var(--duration-base), color var(--duration-micro);
+}
+
+.search-input-wrapper:hover {
+  background: var(--glass-chip-hover);
+  color: var(--text-secondary);
 }
 
 .search-input-wrapper:focus-within {
-  background: var(--bg-panel);
-  border-color: var(--accent-primary);
-  box-shadow: 0 0 0 1px var(--accent-primary), 0 0 10px var(--accent-glow);
+  background: var(--glass-chip-hover);
+  border-color: var(--border-strong);
+  /* 直接复用 --focus-ring，与全站键盘焦点环保持同一套参数。
+     手写副本的价值在于"可以单独微调搜索框"，但实际从未单独调过，
+     反而在改焦点环令牌时会漏掉这一处。 */
+  box-shadow: var(--focus-ring);
+  color: var(--text-secondary);
 }
 
 .search-input-wrapper input {
-  width: 100%;
-  font-size: 12.5px;
+  flex: 1;
+  min-width: 0;
+  /* 撑满 40px 胶囊：否则输入框只有 19px 高，
+     点在胶囊上下内边距上不会聚焦 */
+  align-self: stretch;
+  font-size: var(--text-md);
   color: var(--text-primary);
-  outline: none;
-}
-
-.search-input-wrapper input:focus {
-  outline: none;
 }
 
 .search-input-wrapper input::placeholder {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .search-dropdown {
   position: absolute;
-  top: calc(100% + 8px);
+  top: calc(100% + 12px);
   left: 0;
-  width: 320px;
-  background: var(--popover-bg);
-  backdrop-filter: var(--blur-strong);
-  -webkit-backdrop-filter: var(--blur-strong);
+  width: 420px;
+  max-width: min(600px, calc(100vw - 48px));
+  /* 目前最多 8 热门 + 6 建议 + 8 历史，约 5 行；但窗口变矮或上游放宽上限时
+     下拉会顶出视口。用 max-height 兜底，超出部分内部滚动。 */
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 20px;
+  border-radius: var(--radius-xl);
+  /* 下拉是浮层：必须完全不透明，否则会透出侧栏文字（0.95 在深色下仍可见） */
+  background: var(--bg-panel-solid, #141722);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-float);
-  padding: 16px;
-  z-index: 100;
-  transform-origin: top left;
   display: none;
   opacity: 0;
-  transform: translateY(-6px);
-  transition: opacity var(--duration-normal) var(--ease-desktop-out), transform var(--duration-normal) var(--ease-desktop-out);
+  transform: translateY(-10px) scale(0.98);
+  transform-origin: top left;
+  transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-emphasized);
 }
 
 .search-dropdown.active {
   display: block;
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
+}
+
+.search-dropdown::-webkit-scrollbar {
+  display: none;
 }
 
 .dropdown-section-title {
-  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-size: var(--text-2xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--text-muted);
-  margin-bottom: 8px;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.dropdown-clear-btn {
+  padding: 3px 12px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-tertiary);
+  transition: background var(--duration-micro), color var(--duration-micro);
+}
+
+.dropdown-clear-btn:hover {
+  background: var(--glass-chip-hover);
+  color: var(--text-primary);
 }
 
 .tag-cloud {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.tag-cloud:last-child {
+  margin-bottom: 0;
 }
 
 .tag-item {
-  font-size: 12px;
-  padding: 4px 10px;
+  padding: 6px 14px;
   border-radius: var(--radius-pill);
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
+  background: var(--glass-chip);
+  border: 1px solid var(--glass-stroke);
+  font-size: var(--text-sm);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background var(--duration-micro), color var(--duration-micro);
+  transition: background var(--duration-micro), color var(--duration-micro), border-color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
 }
 
 .tag-item:hover {
-  background: var(--bg-card-hover);
+  background: var(--accent-primary-soft);
+  border-color: color-mix(in srgb, var(--accent-primary) 40%, transparent);
   color: var(--text-primary);
 }
 
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-  margin-left: 14px;
+.tag-item:active {
+  transform: scale(0.98);
 }
 
+/* 平台切换：玻璃滑块分段控件 */
 .provider-toggle {
   position: relative;
   display: flex;
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-pill);
-  padding: 3px;
   gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--glass-chip);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--shadow-sm);
 }
 
-/* 滑块：弹性缓动在选项间滑动，替代生硬的背景/缩放切换 */
 .provider-toggle-thumb {
   position: absolute;
   top: 3px;
@@ -594,17 +920,17 @@
 
 .provider-toggle-thumb.ready {
   opacity: 1;
-  transition: transform 300ms var(--ease-spring-gentle), width 300ms var(--ease-spring-gentle);
+  transition: transform var(--duration-page) var(--ease-emphasized), width var(--duration-page) var(--ease-emphasized);
 }
 
 .provider-btn {
   position: relative;
-  padding: 4px 12px;
-  font-size: 11.5px;
-  font-weight: var(--font-weight-regular);
+  padding: 7px 16px;
   border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
   color: var(--text-secondary);
-  transition: color 220ms var(--ease-desktop-out), background 220ms var(--ease-desktop-out);
+  transition: color var(--duration-micro) var(--ease-out), transform var(--duration-micro) var(--ease-out);
 }
 
 .provider-btn:hover {
@@ -613,417 +939,465 @@
 
 .provider-btn.active {
   color: var(--btn-solid-text);
-  font-weight: var(--font-weight-semibold);
+  font-weight: var(--font-weight-bold);
 }
 
-[data-theme='light'] .provider-toggle-thumb {
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+.provider-btn:active {
+  transform: scale(0.98);
 }
 
-/* 登录弹窗内居中的平台切换 */
-.login-provider-toggle {
-  width: 100%;
-  justify-content: center;
-  margin-bottom: 18px;
-}
-
-.login-provider-toggle .provider-btn {
-  flex: 1;
-  max-width: 160px;
-  padding: 7px 12px;
-  font-size: 12.5px;
-}
-
-/* 登录弹窗 Tab 内容过渡：新内容淡入上移 + 容器高度平滑过渡 */
-.login-tab-transition {
-  overflow: hidden;
-  transition: height 340ms var(--ease-desktop-out);
-}
-
-.login-tab-panel {
-  animation: loginTabIn 360ms var(--ease-desktop-out) both;
-}
-
-@keyframes loginTabIn {
-  from {
-    opacity: 0;
-    transform: translateY(12px) scale(0.985);
-    filter: blur(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
-  }
-}
-
-[data-reduce-effects='true'] .login-tab-panel {
-  animation: none;
-}
-
+/* 顶栏图标按钮 / 用户头像 */
 .topbar-action-btn {
-  width: 30px;
-  height: 30px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--radius-pill);
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
+  background: var(--glass-chip);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--shadow-sm);
   color: var(--text-secondary);
-  transition: background var(--duration-micro), color var(--duration-micro);
+  transition: background var(--duration-micro), color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
 }
 
 .topbar-action-btn:hover {
-  background: var(--bg-card-hover);
+  background: var(--glass-chip-hover);
   color: var(--text-primary);
+}
+
+.topbar-action-btn:active {
+  transform: scale(0.98);
 }
 
 .user-profile-badge {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 10px 3px 3px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
+  gap: 9px;
+  height: 40px;
+  padding: 0 16px 0 5px;
   border-radius: var(--radius-pill);
-  cursor: pointer;
+  background: var(--glass-chip);
+  border: 1px solid var(--glass-stroke);
+  box-shadow: var(--shadow-sm);
+  transition: background var(--duration-micro), transform var(--duration-micro) var(--ease-out), box-shadow var(--duration-base);
 }
 
+.user-profile-badge:hover {
+  background: var(--glass-chip-hover);
+  box-shadow: var(--shadow-sm);
+}
+
+.user-profile-badge:active {
+  transform: scale(0.98);
+}
+
+/* 未登录：中性登录入口，不复用"头像 + 昵称"的已登录形态 */
+.user-guest-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.user-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.user-avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-gradient);
+  color: var(--on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.user-name {
+  max-width: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  line-height: 1;
+}
+
+/* 窗口控制 */
 .window-controls {
   display: flex;
   align-items: center;
   gap: 2px;
   margin-left: 6px;
-  padding-left: 10px;
-  border-left: 1px solid var(--border-subtle);
 }
 
 .window-control-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-tertiary);
-  transition: background var(--duration-micro), color var(--duration-micro);
+  width: 38px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: background var(--duration-micro), color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
 }
 
 .window-control-btn:hover {
-  background: var(--bg-card-hover);
+  background: var(--glass-chip-hover);
   color: var(--text-primary);
 }
 
+.window-control-btn:active {
+  transform: scale(0.98);
+}
+
 .window-control-btn.window-control-close:hover {
-  background: #e81123;
-  color: #fff;
+  background: var(--color-danger);
+  color: var(--on-media);
 }
 
-.user-avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.user-avatar-placeholder {
-  background: var(--accent-gradient);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 11px;
-  font-weight: var(--font-weight-semibold);
-}
-
-.user-name {
-  max-width: 96px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: var(--font-weight-regular);
-  color: var(--text-secondary);
-  line-height: 1;
-}
-
-@media (max-width: 1024px) {
+@media (max-width: 1000px) {
   .topbar .user-name {
     display: none;
   }
 
-  .topbar .provider-btn {
-    padding: 4px 9px;
-    font-size: 11px;
+  .topbar .user-profile-badge {
+    padding: 0 5px;
   }
 }
 
-/* 主内容过渡与滚动条 */
+@media (max-width: 1000px) {
+  .provider-btn {
+    padding: 7px 11px;
+    font-size: var(--text-xs);
+  }
+}
+
+/* ============================================================
+   4. 内容舞台与浮动按钮
+   ============================================================ */
 .main-content {
-  grid-area: content;
-  overflow-y: overlay;
+  position: absolute;
+  left: var(--stage-left);
+  right: var(--stage-right);
+  top: 0;
+  /* 播放坞是悬浮卡（不贴边），坞底与窗口底之间留 14px 缝。
+     滚动视口必须停在坞底而不是窗口底，否则滚动内容会在这条缝里
+     露出被窗口底边切掉半截的文字（缝隙处只应看到纯环境光）。 */
+  bottom: var(--dock-inset);
+  z-index: var(--z-stage);
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  position: relative;
-  z-index: 1;
-  min-width: 0;
-  min-height: 0;
-  background: var(--bg-app);
-  padding-right: 6px;
+  padding: var(--chrome-top) 20px var(--stage-bottom) var(--page-pad-x);
+  /* 原生滚动条贴窗口边，破坏"无元素贴边"的舞台语言；
+     改为隐藏原生条 + 右侧自定义指示器（ScrollIndicator）。 */
+  scrollbar-width: none;
+  transition: left var(--duration-page) var(--ease-out);
 }
 
-/* 优化自定义滚动条：保留内边距防窗口拉伸阻挡 */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+.main-content::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-  margin: 4px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+/* 右侧细滚动指示器：贴窗口右缘内侧 4px，与播放坞顶边齐平 */
+.scroll-indicator {
+  position: fixed;
+  top: calc(var(--chrome-top) + 10px);
+  bottom: calc(var(--stage-bottom) + 10px);
+  right: 4px;
+  width: 3px;
+  z-index: var(--z-float-btn);
   border-radius: var(--radius-pill);
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  transition: background var(--duration-micro);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-base) var(--ease-out);
 }
 
-[data-theme="light"] ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.18);
-  border: 2px solid transparent;
-  background-clip: padding-box;
+.scroll-indicator.visible {
+  opacity: 0.5;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-primary);
-  border: 2px solid transparent;
-  background-clip: padding-box;
+.scroll-indicator.is-active {
+  opacity: 1;
+}
+
+.scroll-indicator-thumb {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  border-radius: inherit;
+  background: var(--scrollbar-thumb);
 }
 
 .main-content-transition-stage {
   position: relative;
   width: 100%;
-  min-height: 100%;
-  padding: 20px 20px 32px 24px;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: 10px 0 26px;
+}
+
+@media (max-width: 1180px) {
+  :root {
+    --page-pad-x: 24px;
+  }
 }
 
 .main-content-view {
   width: 100%;
-  opacity: 0;
-  transform: translateY(12px) scale(0.995);
-  animation: elegantViewFadeIn 320ms var(--ease-desktop-out) forwards;
+  animation: viewEnter var(--duration-page) var(--ease-emphasized) both;
 }
 
-@keyframes elegantViewFadeIn {
+@keyframes viewEnter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
-/* 浮动回到顶部按钮 */
-.scroll-to-top-btn {
-  position: fixed;
-  bottom: 92px;
-  right: 28px;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  background: var(--popover-bg);
-  backdrop-filter: var(--blur-overlay);
-  -webkit-backdrop-filter: var(--blur-overlay);
-  border: 1px solid var(--border-light);
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-md);
-  cursor: pointer;
-  z-index: var(--z-float-btn);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(10px) scale(0.9);
-  transition: opacity var(--duration-micro) var(--ease-desktop-out),
-              transform var(--duration-micro) var(--ease-desktop-out),
-              background var(--duration-micro),
-              color var(--duration-micro);
+[data-reduce-effects='true'] .main-content-view {
+  animation: none;
 }
 
-.scroll-to-top-btn.visible {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translateY(0) scale(1);
-}
-
-.scroll-to-top-btn:hover {
-  background: var(--btn-solid-bg);
-  color: var(--btn-solid-text);
-  box-shadow: var(--shadow-lg);
-  transform: translateY(-2px) scale(1.05);
-}
-
-/* 定位当前播放歌曲按钮（位于回到顶部上方） */
+/* 浮动圆钮（回到顶部 / 定位当前播放）：悬浮在播放坞上方 */
+.scroll-to-top-btn,
 .scroll-to-playing-btn {
   position: fixed;
-  bottom: 140px;
-  right: 28px;
-  width: 38px;
-  height: 38px;
+  /* 与内容右缘（1200）对齐：26px 会让按钮右缘落在 1194，
+     比内容/坞/滚动条三条边线都往里缩，视觉上"没对齐"。 */
+  right: 20px;
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
-  background: var(--popover-bg);
-  backdrop-filter: var(--blur-overlay);
-  -webkit-backdrop-filter: var(--blur-overlay);
-  border: 1px solid var(--border-light);
-  color: var(--accent-primary);
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--glass-chip-hover);
+  border: 1px solid var(--glass-stroke);
   box-shadow: var(--shadow-md);
   cursor: pointer;
   z-index: var(--z-float-btn);
   opacity: 0;
   pointer-events: none;
-  transform: translateY(10px) scale(0.9);
-  transition: opacity var(--duration-micro) var(--ease-desktop-out),
-              transform var(--duration-micro) var(--ease-desktop-out),
-              background var(--duration-micro);
+  transform: translateY(16px) scale(0.88);
+  transition: opacity var(--duration-micro) var(--ease-out),
+              transform var(--duration-base) var(--ease-emphasized),
+              background var(--duration-micro),
+              color var(--duration-micro),
+              box-shadow var(--duration-base);
 }
 
+.scroll-to-top-btn {
+  /* 距播放坞 12px（底边 = 780 - 114 - 12 = 654 → 与坞顶 680 相距 26px） */
+  bottom: calc(var(--stage-bottom) + 12px);
+  color: var(--text-secondary);
+}
+
+.scroll-to-playing-btn {
+  /* 必须比"回到顶部"再高一个按钮身位：原来只高 56px，
+     而按钮高 46px + 视觉间距 24px，两枚按钮会重叠 3px。 */
+  bottom: calc(var(--stage-bottom) + 82px);
+  /* 两枚浮动钮都是"导航"而非"主操作"：默认中性色，
+     hover 时才用强调色（否则粉色图标会被误读为激活态） */
+  color: var(--text-secondary);
+}
+
+.scroll-to-top-btn.visible,
 .scroll-to-playing-btn.visible {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(0) scale(1);
 }
 
+/* 浮动钮是"导航"，不是"主操作"：hover 只提亮一档 + 换图标色。
+   旧版在这里叠了实心反色 + 上移 2px + 放大 8% 三个动作，
+   是全场最重的 hover；而且 box-shadow 用的是 transparent 的
+   --accent-glow，是一条完全无效的声明。 */
+.scroll-to-top-btn:hover,
 .scroll-to-playing-btn:hover {
-  background: var(--btn-solid-bg);
-  color: var(--btn-solid-text);
-  transform: translateY(-2px) scale(1.05);
+  background: var(--text-primary);
+  border-color: transparent;
+  color: var(--on-accent);
 }
 
-/* 定位目标行高亮闪烁提示 */
+/* 定位闪烁 */
 .song-row.locate-flash {
-  animation: locateFlash 1.4s var(--ease-desktop-out);
+  animation: locateFlash 1.4s var(--ease-out);
 }
 
 @keyframes locateFlash {
-  0%, 100% {
-    background: var(--bg-active);
-  }
-  40% {
-    background: var(--accent-glow);
-  }
+  0%, 100% { background: transparent; }
+  30% { background: var(--accent-primary-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 45%, transparent); }
 }
 
-/* 底部播放栏 (PlayerBar - 三列布局确保控制区真正居中) */
+/* ============================================================
+   5. 播放坞（悬浮玻璃通栏）
+   ============================================================ */
 .playerbar {
-  grid-area: player;
-  background: var(--bg-topbar);
-  backdrop-filter: var(--blur-strong);
-  -webkit-backdrop-filter: var(--blur-strong);
-  border-top: 1px solid var(--border-light);
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-player);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 520px) minmax(0, 1fr);
+  /* 右侧承载歌词/相似/音质/队列；中心列收窄到 520，
+     避免中间控制组与右侧功能区之间留下 300px+ 的空场。
+     用 clamp 而不是固定 520：1100–1180 这段过渡带里固定 520 会把左右列
+     压到 233px，按钮间距骤降到 53px（1220 与 1040 都是 ~70–83px）。 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, clamp(420px, 42vw, 520px)) minmax(0, 1fr);
   align-items: center;
-  gap: 20px;
-  padding: 0 24px;
-  height: 76px;
-  width: 100%;
-  position: relative;
-  z-index: 20;
-  box-sizing: border-box;
+  gap: var(--space-6);
+  height: var(--dock-height);
+  padding: 0 20px;
+  border-radius: 0;
+  background: var(--glass-dock);
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  box-shadow: none;
+  overflow: hidden;
+}
+
+/* 播放坞的封面环境光已移除：发光会让底部条变成"彩色灯箱"，
+   与中性外壳冲突。 */
+.playerbar::before {
+  display: none;
 }
 
 .playerbar-left {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
-  justify-self: start;
+  gap: 14px;
   min-width: 0;
+  justify-self: start;
   width: 100%;
 }
 
 .playerbar-center {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  justify-self: center;
-  width: 100%;
-  max-width: 520px;
+  gap: 8px;
   min-width: 0;
+  max-width: 640px;
+  width: 100%;
+  justify-self: center;
 }
 
 .playerbar-right {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  /* 右列比功能项宽时，把按钮均匀铺开，避免全部挤在最右侧、左侧留一大块空场 */
+  justify-content: space-between;
   gap: 10px;
-  justify-self: end;
   min-width: 0;
+  justify-self: end;
   width: 100%;
-  position: relative;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1080px) {
   .playerbar {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 440px) minmax(0, 1fr);
-    gap: 10px;
-    padding-inline: 14px;
+    /* 中列固定 480 时，1040 窗口左列只剩 ~180px，歌名被截成 8 个字。
+       窄窗改为左右等宽、中列收敛到 420：播放键仍落在窗口正中。 */
+    grid-template-columns: minmax(0, 1fr) minmax(0, 420px) minmax(0, 1fr);
+    gap: var(--space-4);
+    padding-inline: 16px;
+  }
+
+  /* 窄窗优先保留播放/音量/音质/队列，隐藏"相似歌曲"这一低频入口 */
+  .playerbar .playerbar-similar-btn {
+    display: none;
+  }
+
+  /* 左列变窄后同步收紧封面与标题，避免歌名/歌手双双截断 */
+  .playerbar .song-cover-wrapper {
+    width: 48px;
+    height: 48px;
+  }
+
+  .playerbar .song-title {
+    font-size: var(--text-md);
+  }
+
+  .playerbar .song-artist-album {
+    font-size: var(--text-xs);
   }
 }
 
+/* 播放坞封面 */
 .song-cover-wrapper {
   position: relative;
-  width: 46px;
-  height: 46px;
-  border-radius: var(--radius-md);
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
-  box-shadow: var(--shadow-md);
-  cursor: pointer;
   flex-shrink: 0;
-  transition: transform var(--duration-micro) var(--ease-desktop-out), box-shadow var(--duration-micro);
+  cursor: pointer;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-cover);
 }
 
-.song-cover-wrapper:hover {
-  transform: scale(1.04);
-  box-shadow: var(--shadow-lg);
+/* 悬停只暗化，不位移不缩放 */
+.song-cover-wrapper:hover .song-cover-overlay {
+  opacity: 1;
+}
+
+/* 空态封面占位：居中音符，颜色随主题 */
+.song-cover-placeholder {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  color: var(--text-tertiary);
+  pointer-events: none;
 }
 
 .song-cover-img {
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  background: var(--song-cover-image), var(--cover-tone);
+  background-position: center;
+  background-size: cover;
 }
 
 .song-cover-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
+  color: var(--on-media);
+  background: rgba(0, 0, 0, 0.4);
   opacity: 0;
-  color: #fff;
   transition: opacity var(--duration-micro);
 }
 
-.song-cover-wrapper:hover .song-cover-overlay {
-  opacity: 1;
-}
-
 .song-info-meta {
-  min-width: 0;
   display: flex;
   flex-direction: column;
+  gap: 3px;
+  min-width: 0;
 }
 
 .song-title {
-  font-size: 13px;
+  font-size: var(--text-lg);
   font-weight: var(--font-weight-semibold);
+  letter-spacing: var(--tracking-snug);
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -1031,8 +1405,8 @@
 }
 
 .song-artist-album {
-  font-size: 11.5px;
-  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1041,145 +1415,195 @@
 .player-meta-link,
 .lyrics-meta-link {
   display: inline;
-  min-width: 0;
-  max-width: 100%;
   padding: 0;
   color: inherit;
   font: inherit;
   line-height: inherit;
-  vertical-align: baseline;
   cursor: pointer;
 }
 
 .player-meta-link:hover,
 .lyrics-meta-link:hover {
-  color: var(--text-primary);
+  color: var(--accent-primary);
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-underline-offset: 3px;
 }
 
-.lyrics-meta-link:hover {
-  color: var(--lyrics-text-active);
-}
-
+/* 传输控制 */
 .playback-controls {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: var(--space-4);
   position: relative;
 }
 
 .control-btn {
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
-  transition: background var(--duration-micro), color var(--duration-micro);
-  width: 30px;
-  height: 30px;
+  color: var(--text-secondary);
+  transition: background var(--duration-micro), color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
 }
 
 .control-btn:hover {
+  background: var(--glass-chip-hover);
   color: var(--text-primary);
-  background: var(--bg-card-hover);
 }
 
+.control-btn:active {
+  transform: scale(0.98);
+}
+
+/* 主播放键：中性反色实心圆。
+   琥珀色做大面积填充会显脏（在浅色主题下尤其明显），
+   这里改用"深色底 + 白色三角"的经典形态，琥珀只留给正在播放的行。 */
 .control-btn.play-primary {
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   background: var(--btn-solid-bg);
   color: var(--btn-solid-text);
-  box-shadow: var(--shadow-sm);
-  transition: transform var(--duration-micro) var(--ease-desktop-out), background var(--duration-micro), box-shadow var(--duration-micro);
+  box-shadow: none;
+  transition: background-color var(--duration-micro) var(--ease-out), transform var(--duration-micro) var(--ease-out);
 }
 
-.control-btn.play-primary:hover {
-  background: var(--btn-solid-hover);
-  transform: scale(1.06);
-  box-shadow: var(--shadow-md);
+@media (hover: hover) {
+  .control-btn.play-primary:hover {
+    background: var(--btn-solid-hover);
+    transform: none;
+  }
 }
 
 .control-btn.play-primary:active {
-  transform: scale(0.96);
+  transform: scale(0.97);
 }
 
+/* 进度 */
 .progress-bar-container {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   width: 100%;
+  max-width: 560px;
 }
 
 .time-label {
-  font-size: 10.5px;
+  min-width: 40px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-  min-width: 30px;
   text-align: center;
 }
 
 .slider-track {
-  flex: 1;
-  height: 3.5px;
-  background: var(--bg-card-hover);
-  border-radius: var(--radius-pill);
   position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text-primary) 16%, transparent);
   cursor: pointer;
-  transition: height var(--duration-micro);
 }
 
+/* 透明热区：视觉条只有 4px，但拖拽/点击需要 ≥24px 的纵向容错。
+   伪元素参与指针命中，事件会冒泡回 .slider-track 的 onPointerDown。 */
+.slider-track::before {
+  content: '';
+  position: absolute;
+  inset: -10px 0;
+}
+
+/* 悬停不再"长高"：高度跳变会让播放坞整体抖动 */
 .slider-track:hover {
-  height: 5px;
+  background: color-mix(in srgb, var(--text-primary) 22%, transparent);
 }
 
 .slider-progress {
-  height: 100%;
-  background: var(--accent-gradient);
-  border-radius: var(--radius-pill);
   position: relative;
-  width: 38%;
-  transition: width 0.1s linear;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--text-primary);
+  transition: width var(--duration-fast) linear;
 }
 
+/* 播放头：只在悬停/聚焦时出现的小圆点 */
+.slider-progress::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 100%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-primary);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%) scale(0);
+  transition: transform var(--duration-micro) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .slider-track:hover .slider-progress::after {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+.slider-track:focus-visible .slider-progress::after {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* 右侧：音质 / 相似 / 队列 */
 .quality-badge-btn {
-  padding: 2px 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-xs);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   font-weight: var(--font-weight-semibold);
-  color: var(--accent-primary);
-  background: var(--bg-card);
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+  transition: background var(--duration-micro), border-color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
 }
 
-/* 音量滑块：--vol 注册为可插值类型，配合 transition 让渐变填充随音量平滑变化
-   （静音按钮、键盘/步进调整时不会生硬跳变） */
+.quality-badge-btn:hover {
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+}
+
+.quality-badge-btn:active {
+  transform: scale(0.98);
+}
+
+/* 音量弹层 */
 @property --vol {
   syntax: '<percentage>';
   inherits: false;
   initial-value: 0%;
 }
 
+.volume-popover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 10px 12px;
+}
+
 .volume-slider {
   --vol: 50%;
   -webkit-appearance: none;
   appearance: none;
-  /* 纵向滑块：vertical-lr 转竖向，direction: rtl 让最大值在顶部（常规音量条方向） */
   writing-mode: vertical-lr;
   direction: rtl;
-  width: 18px;
-  height: 96px;
+  width: 20px;
+  height: 108px;
   border-radius: var(--radius-pill);
   outline: none;
   cursor: pointer;
-  /* 填充自下而上；渐变只画在中央 4px 的视觉轨道上，元素整体加宽作点击热区 */
   background: linear-gradient(
     to top,
     var(--accent-primary) 0%,
     var(--accent-primary) var(--vol),
-    var(--bg-card-hover) var(--vol)
-  ) center / 4px 100% no-repeat;
-  transition: --vol 180ms var(--ease-desktop-out);
+    color-mix(in srgb, var(--text-primary) 16%, transparent) var(--vol)
+  ) center / 5px 100% no-repeat;
+  transition: --vol var(--duration-fast) var(--ease-out);
 }
 
 .volume-slider::-webkit-slider-thumb {
@@ -1188,95 +1612,76 @@
   width: 12px;
   height: 12px;
   border-radius: 50%;
+  /* 走主题令牌：硬编码 #fff 在浅色主题的白底上等于隐形 */
   background: var(--text-primary);
-  border: none;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   cursor: pointer;
 }
 
-.volume-slider:focus-visible {
-  outline: none;
-}
-
-/* 音量弹出面板（按钮式触发，纵向布局：百分比 → 滑块 → 静音） */
-.volume-popover {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 8px 10px;
-}
-
 .volume-percent-label {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
 }
 
 .volume-popover-mute {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   transition: background var(--duration-micro), color var(--duration-micro);
 }
 
 .volume-popover-mute:hover {
-  background: var(--bg-card-hover);
+  background: var(--glass-chip-hover);
   color: var(--text-primary);
 }
 
+/* ============================================================
+   6. 抽屉（队列 / 相似歌曲）
+   ============================================================ */
 .drawer-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: var(--blur-overlay);
-  -webkit-backdrop-filter: var(--blur-overlay);
   z-index: var(--z-drawer-overlay);
+  /* 纯色半透明遮罩：之前的 blur(14px) 会把整页糊成毛玻璃，
+     既费 GPU 又让背景失去结构感。 */
+  background: var(--scrim);
   opacity: 0;
-  pointer-events: none;
   visibility: hidden;
-  transition: opacity var(--duration-normal) var(--ease-desktop-out), visibility var(--duration-normal);
+  pointer-events: none;
+  will-change: opacity;
+  transition: opacity var(--duration-base) var(--ease-out), visibility var(--duration-base);
 }
 
 .drawer-overlay.active {
   opacity: 1;
-  pointer-events: auto;
   visibility: visible;
+  pointer-events: auto;
 }
 
-/* 歌词页打开时，队列抽屉叠在歌词之上（介于歌词 1000 与弹窗 2000 之间） */
 .drawer-overlay.over-lyrics {
-  z-index: 1200;
+  z-index: var(--z-drawer-over-lyrics);
 }
 
-.drawer-panel.over-lyrics {
-  z-index: 1201;
-}
-
-/* 🎯 修正点5：重构播放队列抽屉（带细腻专辑封面与软分界线） */
 .drawer-panel {
   position: fixed;
-  top: 68px;
-  right: -390px;
-  width: 360px;
-  bottom: 88px;
-  background: var(--bg-panel);
-  /* 面板 blur 降到 10px：原 blur(40px) 在打开过渡期间每帧全面板重采样，是首开卡顿主因 */
-  backdrop-filter: blur(10px) saturate(150%);
-  -webkit-backdrop-filter: blur(10px) saturate(150%);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-drawer);
-  box-shadow: var(--shadow-float);
-  z-index: var(--z-drawer);
-  transition: right var(--duration-normal) var(--ease-desktop-out), transform var(--duration-normal) var(--ease-desktop-out), visibility var(--duration-normal);
+  /* 顶栏 56px + 8px 间距，右缘与内容区 16px 内边距对齐 */
+  top: calc(var(--chrome-top) + 8px);
+  right: -440px;
+  /* 高度由内容决定，但不能压到播放坞 */
+  bottom: auto;
+  max-height: calc(100vh - var(--stage-bottom) - var(--chrome-top) - 16px);
+  width: 380px;
   display: flex;
   flex-direction: column;
   padding: 18px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel-solid);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-float);
   visibility: hidden;
+  z-index: var(--z-drawer);
+  transition: right var(--duration-base) var(--ease-emphasized), visibility var(--duration-base);
 }
 
 .drawer-panel.open {
@@ -1288,61 +1693,178 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 12px;
-  margin-bottom: 10px;
-  border-bottom: 1px solid var(--border-subtle);
+  gap: 12px;
+  padding-bottom: 14px;
 }
 
-.drawer-title {
-  font-size: 14.5px;
-  font-weight: var(--font-weight-semibold);
+/* 抽屉标题区右侧动作：换一批 / 清空 / 关闭 */
+.drawer-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.drawer-close-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  transition: background var(--duration-micro), color var(--duration-micro);
+}
+
+.drawer-close-btn:hover {
+  background: var(--glass-chip-hover);
   color: var(--text-primary);
 }
 
-/* 队列歌曲行结构优化 */
+.drawer-title {
+  font-family: var(--font-display);
+  font-size: var(--text-h1);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--tracking-tight);
+  color: var(--text-primary);
+}
+
+.drawer-subtitle {
+  padding: 0 0 12px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--text-tertiary);
+}
+
+.drawer-status {
+  padding: 44px 16px;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.drawer-action-btn {
+  padding: 6px 14px;
+  font-size: var(--text-xs);
+}
+
+/* 队列顶部的"正在播放"卡：封面 + 标题 + 进度 */
+/* 队列顶部的"正在播放"卡 */
+.queue-now-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  margin-bottom: 14px;
+  border-radius: var(--radius-md);
+  /* 纯中性表面：之前这里叠了一层 aurora 径向渐变，
+     会让队列卡随当前封面变色，与"界面不产生装饰色"冲突 */
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+}
+
+.queue-now-cover {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-cover);
+}
+.queue-now-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.queue-now-label {
+  font-size: var(--text-2xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+
+.queue-now-title {
+  font-size: var(--text-md);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-now-artist {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-now-progress {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text-primary) 14%, transparent);
+  overflow: hidden;
+  margin-top: 3px;
+}
+
+.queue-now-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-gradient);
+}
+
 .queue-song-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+  /* 抽屉内不再出现 Fluent 原生滚动条：与主内容一致，只保留滚动行为 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
-/* 虚拟滚动：外层 spacer 撑起总高，行绝对定位 */
+.queue-song-list::-webkit-scrollbar {
+  display: none;
+}
+
 .queue-song-list.queued-list-virtual {
-  gap: 0;
   position: relative;
+  gap: 0;
 }
 
 .queued-list-spacer {
   position: relative;
   width: 100%;
-  /* 绝不能被 flex 收缩：其子行全是绝对定位，min-content 高度为 0，
-     一旦被 shrink 就撑不起 N*行高 的总高，scrollHeight 会随虚拟窗口位置自扩展
-     （表现为滚动条越滚越短、拖动时抽搐） */
   flex: none;
 }
 
 .queue-song-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 12px;
+  padding: 8px 12px;
   border-radius: var(--radius-md);
-  /* 只过渡背景色：虚拟行的定位走 translate 属性，绝不能进 transition，
-     否则滚动跨桶时行会带着 180ms 平滑追赶真实偏移，表现为滚动条抽搐 */
-  transition: background var(--duration-micro) var(--ease-desktop-out);
   cursor: pointer;
+  transition: background var(--duration-micro) var(--ease-out), transform var(--duration-micro) var(--ease-out);
 }
 
-/* 面板打开时：队列条目从上到下依次模糊淡入（与歌曲列表一致的进入动画） */
 .queue-song-list.queued-entry-anim .queue-song-item {
-  animation: itemBlurIn 340ms var(--ease-desktop-out) backwards;
-  animation-delay: calc(var(--i, 0) * 28ms);
+  animation: itemBlurIn var(--duration-page) var(--ease-emphasized) backwards;
+  animation-delay: calc(min(var(--i, 0), var(--stagger-cap)) * var(--stagger-step));
 }
 
-/* 虚拟滚动行：用独立 translate 属性定位（与 hover 的 transform 可叠加，互不干扰） */
 .queue-song-item.virtual {
   position: absolute;
   left: 0;
@@ -1351,22 +1873,27 @@
   translate: 0 var(--queued-item-y, 0px);
 }
 
-.queue-song-item:hover {
-  background: var(--bg-card-hover);
-  /* hover 左移走 transform：transform 与 translate 是独立属性，
-     不参与定位也不在 transition 列表里，瞬时生效且不影响虚拟行偏移 */
-  transform: translateX(-2px);
+@media (hover: hover) {
+  .queue-song-item:hover {
+    background: var(--glass-chip);
+    transform: translateX(-2px);
+  }
 }
 
 .queue-song-item.playing {
-  background: var(--bg-active);
+  background: linear-gradient(90deg, var(--accent-primary-soft) 0%, transparent 90%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary) 22%, transparent);
 }
 
 .queue-song-cover {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
   object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-xs);
 }
 
 .queue-song-meta {
@@ -1374,8 +1901,13 @@
   min-width: 0;
 }
 
+/* 注意：这里必须是 block 而不是 flex。text-overflow 只对块级容器生效，
+   写成 flex 时文字会变成匿名 flex 项（min-width:auto + nowrap），
+   既不能收缩也不会出现省略号，长标题直接被 overflow:hidden 硬裁。 */
 .queue-song-title {
-  font-size: 12.5px;
+  display: block;
+  min-width: 0;
+  font-size: var(--text-md);
   font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   white-space: nowrap;
@@ -1383,8 +1915,19 @@
   text-overflow: ellipsis;
 }
 
+/* 播放中的均衡器：改成行内 flex，才能与标题同一行并一起参与省略号。
+   选择器要比 views.css 的 .playing-wave 更高特异度（其 display:flex 会覆盖单类选择器）。 */
+.queue-song-title .queue-item-wave {
+  display: inline-flex;
+  vertical-align: middle;
+}
+
+.queue-song-item.playing .queue-song-title {
+  color: var(--accent-primary);
+}
+
 .queue-song-artist {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-tertiary);
   white-space: nowrap;
   overflow: hidden;
@@ -1392,959 +1935,174 @@
 }
 
 .queue-song-time {
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
 }
 
 .queue-song-like {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  color: var(--text-tertiary);
-  transition: background var(--duration-micro), color var(--duration-micro);
-}
-
-.queue-song-like:hover:not(:disabled),
-.queue-song-like:focus-visible {
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
-}
-
-.queue-song-like.liked {
-  color: var(--accent-primary);
-}
-
-.queue-song-like.liked svg {
-  fill: currentColor;
-}
-
-.queue-song-like:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-/* 喜欢操作进行中的加载遮罩 */
-.mini-spinner {
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  border: 2px solid var(--border-light);
-  border-top-color: var(--accent-primary);
-  animation: miniSpin 0.7s linear infinite;
-  display: inline-block;
-}
-
-@keyframes miniSpin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-[data-reduce-effects='true'] .mini-spinner {
-  animation-duration: 1.2s;
-}
-
-/* 🎼 歌词页面：全新 macOS / iOS 苹果设计语言展开与收起转场 (Apple Sheet Motion) */
-.lyrics-overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--lyrics-overlay-bg);
-  z-index: 1000;
-  display: flex;
-  flex-direction: column;
-  opacity: 0;
-  pointer-events: none;
-  visibility: hidden;
-  transform: translateY(100%) scale(0.96);
-  /* visibility 不参与过渡：保证激活时立即可见可点，防止动画被冻结时页面“活着但看不见” */
-  transition: transform 420ms var(--ease-desktop-out),
-              opacity 300ms var(--ease-desktop-out);
-  overflow: hidden;
-  will-change: transform, opacity;
-}
-
-/* 歌词页背景层：完全不透明纯色遮罩，杜绝透出主页内容 */
-.lyrics-overlay::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background: var(--lyrics-overlay-bg-solid);
-  pointer-events: none;
-}
-
-.lyrics-overlay > * {
-  position: relative;
-  z-index: 1;
-}
-
-/* 动态背景：参考 redesign-demo 歌词页的光晕层（置于纯色底之上、内容之下） */
-.lyrics-overlay .lyrics-dynamic-bg {
-  position: absolute;
-  inset: -10%;
-  z-index: 1;
-  pointer-events: none;
-  overflow: hidden;
-}
-
-.lyrics-glow-orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(90px) saturate(160%);
-  opacity: 0.3;
-  mix-blend-mode: screen;
-  will-change: transform;
-}
-
-.lyrics-glow-1 {
-  top: 8%;
-  left: 12%;
-  width: 420px;
-  height: 420px;
-  background: var(--accent-primary);
-  animation: lyricsFloat1 14s ease-in-out infinite alternate;
-}
-
-.lyrics-glow-2 {
-  bottom: 12%;
-  right: 16%;
-  width: 480px;
-  height: 480px;
-  background: var(--accent-secondary);
-  animation: lyricsFloat2 16s ease-in-out infinite alternate;
-}
-
-@keyframes lyricsFloat1 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(48px, 36px) scale(1.08); }
-}
-
-@keyframes lyricsFloat2 {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(-40px, -44px) scale(1.1); }
-}
-
-/* 歌词页在浅色主题下：光晕使用 multiply 叠加在浅色底上 */
-[data-theme='light'] .lyrics-glow-orb {
-  opacity: 0.16;
-  mix-blend-mode: multiply;
-}
-
-[data-reduce-effects='true'] .lyrics-glow-orb {
-  animation: none;
-}
-
-.lyrics-overlay.active {
-  pointer-events: auto;
-  visibility: visible;
-  opacity: 1;
-  animation: lyricsSheetEnter 560ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
-}
-
-@keyframes lyricsSheetEnter {
-  0% {
-    opacity: 0;
-    transform: translateY(100%) scale(0.96);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.lyrics-overlay.lyrics-exiting {
-  pointer-events: none;
-  visibility: visible;
-  animation: lyricsSheetExit 400ms cubic-bezier(0.32, 0.72, 0, 1) forwards;
-}
-
-@keyframes lyricsSheetExit {
-  0% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translateY(100%) scale(0.96);
-  }
-}
-
-[data-reduce-effects='true'] .lyrics-overlay,
-[data-reduce-effects='true'] .lyrics-overlay.lyrics-exiting {
-  animation: none;
-  transition: opacity 160ms var(--ease-desktop-out);
-}
-
-[data-reduce-effects='true'] .lyrics-overlay.lyrics-exiting {
-  opacity: 0;
-}
-
-.lyrics-header {
-  flex: 0 0 60px;
-  height: 60px;
-  min-height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 28px;
-  color: var(--lyrics-header-text);
-  position: relative;
-  z-index: 2;
-  box-sizing: border-box;
-  -webkit-app-region: drag;
-  user-select: none;
-  transition: opacity 300ms var(--ease-desktop-out), translate 320ms var(--ease-desktop-out);
-}
-
-.lyrics-header button,
-.lyrics-header a,
-.lyrics-header [role='button'] {
-  -webkit-app-region: no-drag;
-}
-
-.lyrics-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.lyrics-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* 歌词页右上角窗口控制（最小化/最大化/关闭），贴合歌词页配色 */
-.lyrics-header-actions .window-controls {
-  margin-left: 4px;
-  padding-left: 8px;
-  border-left: 1px solid var(--border-subtle);
-}
-
-.lyrics-header-actions .window-control-btn {
-  color: var(--lyrics-text-hover);
-}
-
-.lyrics-header-actions .window-control-btn:hover {
-  background: var(--bg-active);
-  color: var(--lyrics-text-active);
-}
-
-.lyrics-header-actions .window-control-btn.window-control-close:hover {
-  background: rgba(244, 63, 94, 0.28);
-  color: #fff;
-}
-
-.lyrics-header-btn {
   width: 30px;
   height: 30px;
   border-radius: 50%;
-  /* 幽灵形态：无常驻底色与描边，融入歌词页背景，仅 hover/active 给轻反馈 */
-  background: transparent;
-  border: 1px solid transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--lyrics-text-hover);
-  transition: background var(--duration-micro), color var(--duration-micro), border-color var(--duration-micro);
-}
-
-.lyrics-header-btn:hover:not(:disabled) {
-  background: var(--bg-active);
-  color: var(--lyrics-text-active);
-}
-
-.lyrics-header-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.lyrics-header-close:hover:not(:disabled) {
-  background: rgba(244, 63, 94, 0.28);
-  color: #fff;
-}
-
-.lyrics-header-btn.active {
-  background: var(--bg-active);
-  color: var(--lyrics-text-active);
-}
-
-/* 歌词工具：平铺面板弹层（译文 / 偏移 / 字号 三段直排） */
-.lyrics-tools-panel {
-  position: fixed;
-  width: 180px;
-  z-index: 2000;
-  background: var(--popover-bg);
-  backdrop-filter: var(--blur-strong);
-  -webkit-backdrop-filter: var(--blur-strong);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-float);
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  animation: popoverMount 180ms var(--ease-desktop-out) forwards;
-}
-
-.lyrics-panel-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.lyrics-panel-section-label {
-  font-size: 10px;
-  font-weight: var(--font-weight-semibold);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
   color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity var(--duration-micro), background var(--duration-micro), color var(--duration-micro);
 }
 
-.lyrics-panel-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+/* 与 .queue-song-remove 对齐：键盘聚焦时也要显形，
+   否则焦点会停在一个完全不可见的喜欢按钮上 */
+.queue-song-item:hover .queue-song-like,
+.queue-song-item:focus-within .queue-song-like,
+.queue-song-like:focus-visible,
+.queue-song-like.liked {
+  opacity: 1;
 }
 
-.lyrics-panel-segmented {
-  display: flex;
-  padding: 2px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
+.queue-song-like:hover {
+  background: var(--glass-chip-hover);
+  color: var(--accent-primary);
 }
 
-.lyrics-panel-seg-btn {
-  flex: 1;
-  min-width: 0;
-  height: 24px;
-  border-radius: var(--radius-pill);
-  font-size: 11.5px;
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-secondary);
-  transition: background var(--duration-micro), color var(--duration-micro);
-}
-
-.lyrics-panel-seg-btn.active {
-  background: var(--bg-active);
-  color: var(--text-primary);
-}
-
-.lyrics-panel-icon-btn {
+.queue-song-remove {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
   flex-shrink: 0;
-  transition: background var(--duration-micro), color var(--duration-micro), border-color var(--duration-micro);
-}
-
-.lyrics-panel-icon-btn:hover:not(:disabled) {
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
-  border-color: var(--border-focus);
-}
-
-.lyrics-panel-value {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-card);
-  border: 1px solid transparent;
-  font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  color: var(--text-secondary);
-  cursor: pointer;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: border-color var(--duration-micro), color var(--duration-micro);
-}
-
-.lyrics-panel-value:hover {
-  border-color: var(--border-light);
-  color: var(--text-primary);
-}
-
-.lyrics-panel-divider {
-  height: 1px;
-  background: var(--border-subtle);
-  margin: 1px 0;
-}
-
-.lyrics-overlay.chrome-hidden .lyrics-header {
-  opacity: 0;
-  pointer-events: none;
-  translate: 0 -120%;
-}
-
-[data-reduce-effects='true'] .lyrics-overlay.chrome-hidden .lyrics-header {
-  translate: none;
-}
-
-.lyrics-main-body {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.1fr);
-  align-items: stretch;
-  gap: 36px;
-  padding: 0 60px;
-  overflow: hidden;
-  position: relative;
-  z-index: 2;
-}
-
-/* 静态大气高端大封面 layout */
-.lyrics-artwork-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 22px;
-  min-width: 0;
-  min-height: 0;
-}
-
-.lyrics-big-cover-anchor {
-  width: fit-content;
-  height: fit-content;
-  display: block;
-  transition: transform 480ms var(--ease-desktop-out), opacity 200ms ease;
-}
-
-[data-reduce-effects='true'] .lyrics-big-cover-anchor {
-  transition: none;
-}
-
-.lyrics-big-cover {
-  width: 300px;
-  height: 300px;
-  border-radius: var(--radius-xl);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-light);
-  object-fit: cover;
-  /* 封面载体：--song-cover-image 由组件注入（url(...)），--cover-tone 兜底渐变 */
-  background: var(--song-cover-image), var(--cover-tone);
-  background-position: center;
-  background-size: cover;
-}
-
-/* 切歌过渡：骨架占位 + 内容淡入 */
-.lyrics-lines-skeleton {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 18px;
-  align-self: stretch;
-  flex: 1;
-  padding-inline: 24px;
-  pointer-events: none;
-}
-
-.lyrics-meta-skeleton {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding-block: 4px;
-}
-
-.lyrics-content-enter {
-  animation: lyricsContentIn 420ms var(--ease-desktop-out) both;
-}
-
-@keyframes lyricsContentIn {
-  from {
-    opacity: 0;
-    transform: translateY(14px);
-    filter: blur(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-    filter: blur(0);
-  }
-}
-
-/* 切歌时大封面从模糊中清晰浮现 */
-.lyrics-cover-enter {
-  animation: lyricsCoverIn 480ms var(--ease-desktop-out) both;
-}
-
-@keyframes lyricsCoverIn {
-  from {
-    opacity: 0;
-    transform: scale(0.94);
-    filter: blur(14px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-    filter: blur(0);
-  }
-}
-
-@media (max-width: 920px) {
-  .lyrics-main-body {
-    grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.25fr);
-    gap: 20px;
-    padding-inline: 28px;
-  }
-
-  .lyrics-big-cover {
-    width: 220px;
-    height: 220px;
-  }
-
-  .lyrics-header {
-    padding-inline: 18px;
-  }
-}
-
-@media (max-height: 700px) {
-  .lyrics-big-cover {
-    width: 220px;
-    height: 220px;
-  }
-
-  .lyrics-artwork-container {
-    gap: 14px;
-  }
-
-  .lyrics-scroll-container {
-    padding-block: 160px 190px;
-  }
-}
-
-/* 歌词滚动区：纵向排布，工具条作为右上角悬浮玻璃胶囊浮在滚动区上方 */
-.lyrics-scroll-zone {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  min-width: 0;
-  min-height: 0;
-}
-
-/* 歌词滚动区外衬：歌词行自带距离透明度/虚化，容器自然裁切，
-   不再叠加上下边缘的“羽化遮罩” —— 遮罩会随滚动持续压在歌词上，
-   造成白底/虚化盖住歌词、难以看清 */
-.lyrics-scroll-wrap {
-  position: relative;
-  display: flex;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-}
-
-.lyrics-scroll-container {
-  height: auto;
-  max-height: 100%;
-  min-width: 0;
-  min-height: 0;
-  align-self: stretch;
-  /* 作为歌词行的 offsetParent，保证 offsetTop/居中计算在内容坐标系内 */
-  position: relative;
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  padding: 200px 0 240px 0;
-  /* 不透明度/缩放即可完成边缘羽化的视觉；不使用 mask-image，
-     避免软渲染下 mask+blur 组合层造成 GPU/合成器崩溃 */
-  /* 注意：不能设 scroll-behavior: smooth——rAF 逐帧写 scrollTop 会被其
-     拦截成平滑动画，产生滚动滞后/粘滞（行切换滚动不跟手主因） */
-}
-
-.lyrics-scroll-container::-webkit-scrollbar {
-  display: none;
-}
-
-/* 用户手动滚动浏览时：取消逐行模糊，保证歌词清晰可读 */
-.lyrics-scroll-container.user-scrolling .lyric-line {
-  filter: none !important;
-}
-
-.lyric-line {
-  position: relative;
-  font-size: calc(24px * var(--lyrics-scale, 1));
-  font-weight: var(--font-weight-regular);
-  color: var(--lyrics-text-inactive);
-  padding: 16px 24px;
-  /* 注意：filter 不参与过渡动画（软渲染下逐帧 blur 极易卡死/崩溃），模糊仅静态生效；
-     font-size 参与过渡：行切换 24→34px 平滑变化，避免行高骤变导致的内容跳动 */
-  transition: transform 0.4s var(--ease-desktop-out), opacity 0.4s var(--ease-desktop-out), color 0.4s var(--ease-desktop-out), font-size 0.4s var(--ease-desktop-out);
-  cursor: pointer;
-  white-space: normal;
-  word-break: break-word;
-  max-width: 92%;
-  opacity: 0.3;
-  transform: scale(0.96);
-  transform-origin: left center;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.lyric-hover-play-btn {
-  opacity: 0;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--accent-primary);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity 0.2s ease;
-  flex-shrink: 0;
-}
-
-.lyric-line:hover .lyric-hover-play-btn {
-  opacity: 1;
-}
-
-.lyric-text-content {
-  flex: 1;
-  letter-spacing: -0.2px;
-}
-
-/* ==================== 歌词逐字描光（旧版 LyricsPanel 3461行 兼容） ====================
-   旧版 LyricsPanel 使用 .lyric-char、.lyric-char-filled、.lyric-char-in-progress、
-   --lyric-char-progress、--lyric-char-fill 等由 JS 驱动的类名和 CSS 变量。
-   下面补齐旧版需要的逐字描光 CSS。 */
-
-/* 旧版歌词行文本容器 */
-.lyric-line-text {
-  display: inline;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* 旧版译文样式 */
-.lyrics-translation-text {
-  display: block;
-  font-size: 16px;
-  font-weight: var(--font-weight-regular);
-  color: var(--lyrics-trans-inactive);
-  margin-top: 6px;
-}
-
-.lyric-line.active .lyrics-translation-text {
-  color: var(--lyrics-trans-active);
-  font-weight: var(--font-weight-regular);
-}
-
-/* 逐字字符：默认未唱状态，用 CSS 变量 --lyric-char-fill 控制渐变填充 */
-.lyric-char {
-  display: inline;
-  background-image: linear-gradient(
-    90deg,
-    var(--lyrics-text-active) 0%,
-    var(--lyrics-text-active) var(--lyric-char-fill, 0%),
-    var(--lyrics-text-inactive) var(--lyric-char-fill, 0%),
-    var(--lyrics-text-inactive) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-
-/* 已唱过的字符 */
-.lyric-char-filled {
-  background-image: linear-gradient(
-    90deg,
-    var(--lyrics-text-active) 0%,
-    var(--lyrics-text-active) var(--lyric-char-fill, 100%),
-    var(--lyrics-text-inactive) var(--lyric-char-fill, 100%),
-    var(--lyrics-text-inactive) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-
-/* 减弱动效模式：逐字描光降级为简单的颜色切换 */
-[data-reduce-effects='true'] .lyric-char,
-[data-reduce-effects='true'] .lyric-char-filled {
-  background: none;
-  -webkit-background-clip: unset;
-  background-clip: unset;
-  -webkit-text-fill-color: var(--lyrics-text-inactive);
-  color: var(--lyrics-text-inactive);
-}
-
-[data-reduce-effects='true'] .lyric-char-filled {
-  -webkit-text-fill-color: var(--lyrics-text-active);
-  color: var(--lyrics-text-active);
-}
-.lyric-line.near-1 {
-  opacity: 0.78;
-  transform: scale(0.98);
-  filter: blur(1px);
-  color: var(--lyrics-text-hover);
-}
-
-.lyric-line.near-2 {
-  opacity: 0.62;
-  transform: scale(0.97);
-  filter: blur(2px);
-  color: var(--lyrics-text-hover);
-}
-
-/* 🎯 当前精准高亮激活行与逐字/逐句时间帧描光 */
-.lyric-line.active {
-  font-size: calc(34px * var(--lyrics-scale, 1));
-  font-weight: var(--font-weight-bold);
-  opacity: 1;
-  transform: scale(1.03) translateX(12px);
-  color: var(--lyrics-text-active);
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.35);
-}
-
-/* 距离当前行越远，逐行递进增加歌词模糊：模糊为静态值（不做 filter 过渡动画，
-   软渲染下逐帧模糊会卡死/崩溃）。半径随距离递进，远处歌词仍保持基本可读
-   （不再叠加上下边缘羽化遮罩，滚动时不会出现遮罩压住歌词的情况） */
-.lyric-line.far-1 {
-  opacity: 0.42;
-  transform: scale(0.95);
-  filter: blur(3px);
-  color: var(--lyrics-text-inactive);
-}
-
-.lyric-line.far-2 {
-  opacity: 0.25;
-  transform: scale(0.94);
-  filter: blur(4px);
-  color: var(--lyrics-text-inactive);
-}
-
-[data-reduce-effects='true'] .lyric-line.far-1,
-[data-reduce-effects='true'] .lyric-line.far-2 {
-  filter: none;
-}
-
-.lyric-translation {
-  font-size: 16px;
-  font-weight: var(--font-weight-regular);
-  color: var(--lyrics-trans-inactive);
-  margin-top: 6px;
-}
-
-.lyric-line.active .lyric-translation {
-  color: var(--lyrics-trans-active);
-  font-weight: var(--font-weight-regular);
-}
-
-/* 歌词页完整播放底栏 */
-.lyrics-playerbar {
-  position: absolute;
-  bottom: 24px;
-  left: 50%;
-  translate: -50% 0;
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  padding: 10px 22px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-panel);
-  border: 1px solid var(--border-light);
-  box-shadow: var(--shadow-float);
-  z-index: 3;
-  max-width: min(820px, calc(100vw - 48px));
-  transition: opacity 300ms var(--ease-desktop-out), translate 320ms var(--ease-desktop-out);
-}
-
-.lyrics-playerbar-center {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  width: 100%;
-}
-
-.lyrics-playerbar-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-
-.lyrics-overlay.chrome-hidden .lyrics-playerbar {
-  opacity: 0;
-  pointer-events: none;
-  translate: -50% 130%;
-}
-
-[data-reduce-effects='true'] .lyrics-overlay.chrome-hidden .lyrics-playerbar {
-  translate: -50% 0;
-}
-
-@media (max-width: 720px) {
-  .lyrics-playerbar {
-    gap: 14px;
-    padding: 10px 14px;
-  }
-
-  /* 小屏歌词页播放栏：隐藏音量滑块（保留静音按钮），避免与进度条挤压 */
-  .lyrics-playerbar .volume-slider {
-    display: none;
-  }
-}
-
-.context-menu {
-  position: fixed;
-  width: 190px;
-  max-height: min(360px, calc(100vh - 16px));
-  overflow: visible;
-  background: var(--popover-bg);
-  backdrop-filter: var(--blur-strong);
-  -webkit-backdrop-filter: var(--blur-strong);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-float);
-  padding: 5px;
-  z-index: 5000;
-  display: none;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.context-menu.active {
-  display: flex;
-  animation: popoverFadeIn 0.18s var(--ease-desktop-out);
-}
-
-.context-menu-item {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  width: 100%;
-  min-height: 30px;
-  padding: 7px 10px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  line-height: 1.35;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background var(--duration-micro), color var(--duration-micro);
-}
-
-.context-menu-item-with-arrow {
-  justify-content: space-between;
-}
-
-.context-menu-item.disabled {
   color: var(--text-muted);
-  cursor: default;
-  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-micro), background var(--duration-micro), color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
 }
 
-.context-menu-item:hover {
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
+.queue-song-item:hover .queue-song-remove,
+.queue-song-remove:focus-visible {
+  opacity: 1;
 }
 
-.context-menu-divider {
-  height: 1px;
-  background: var(--border-subtle);
-  margin: 3px 0;
+.queue-song-remove:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
 }
 
-.context-menu-submenu {
-  position: absolute;
-  top: 0;
-  left: calc(100% + 6px);
-  width: 210px;
-  max-height: min(320px, calc(100vh - 16px));
-  overflow-y: auto;
-  padding: 5px;
-  background: var(--popover-bg);
-  backdrop-filter: var(--blur-strong);
-  -webkit-backdrop-filter: var(--blur-strong);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-float);
+.queue-item-wave {
+  height: 12px;
+  gap: 2px;
+  margin-right: 8px;
+  flex-shrink: 0;
 }
 
-.context-menu.opens-left .context-menu-submenu {
-  right: calc(100% + 6px);
-  left: auto;
+.queue-item-wave span {
+  width: 2.5px;
+  animation-duration: 0.8s;
 }
 
+.mini-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent-primary) 22%, transparent);
+  border-top-color: var(--accent-primary);
+  animation: miniSpinner 720ms linear infinite;
+}
+
+@keyframes miniSpinner {
+  to { transform: rotate(360deg); }
+}
+
+[data-reduce-effects='true'] .mini-spinner {
+  animation-duration: 1var(--duration-page);
+}
+
+/* 封面占位：渐变底色 + 居中音符 */
+.cover-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+[data-theme='light'] .cover-fallback {
+  color: rgba(20, 22, 31, 0.4);
+}
+
+/* ============================================================
+   7. 菜单（右键 / 弹出 / 分类面板）
+   ============================================================ */
 .popover-menu {
   position: fixed;
-  background: var(--popover-bg);
-  backdrop-filter: var(--blur-strong);
-  -webkit-backdrop-filter: var(--blur-strong);
-  border: 1px solid var(--border-light);
+  padding: 8px;
   border-radius: var(--radius-lg);
+  background: var(--bg-panel-solid);
+  border: 1px solid var(--border-light);
   box-shadow: var(--shadow-float);
-  padding: 6px;
+  z-index: var(--z-dropdown);
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  min-width: 76px;
-  max-width: 104px;
-  z-index: var(--z-dropdown);
-  transform-origin: center center;
+  gap: 2px;
+  min-width: 104px;
+  max-width: 148px;
   opacity: 0;
-  pointer-events: none;
-  transform: translateY(8px) scale(0.92);
-  transition: opacity 180ms var(--ease-desktop-out),
-              transform 180ms var(--ease-desktop-out),
-              visibility 180ms var(--ease-desktop-out);
   visibility: hidden;
+  pointer-events: none;
+  transform: translateY(6px) scale(0.98);
+  /* 浮层用 --ease-spring：这是全站唯一允许"过冲一点点"的场景，
+     因为菜单是从锚点边长出来的，轻微的 2% 过冲能补上"弹到位"的手感。
+     旧的写法同时挂了 transition 和 animation（popoverMount），
+     两条动画抢同一个 transform，实际播放的是后者的 from 值，
+     表现为"先跳一下再滑"。这里只保留 transition。 */
+  transition: opacity var(--duration-fast) var(--ease-out),
+              transform var(--duration-base) var(--ease-spring),
+              visibility var(--duration-fast);
 }
 
-/* 挂载时播放弹出动画（因为菜单组件挂载时即带 open 类，需用 animation 而非 transition） */
 .popover-menu.open {
   opacity: 1;
-  pointer-events: auto;
   visibility: visible;
-  animation: popoverMount 200ms var(--ease-desktop-out) forwards;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
 }
 
-/* 音量面板：children 自定义内容模式，宽度按内容收缩
-   （覆盖为文字菜单项设计的 76~104px 宽度区间） */
 .popover-menu--volume {
   min-width: 0;
   max-width: none;
 }
 
-@keyframes popoverMount {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.9);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+.popover-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-micro), color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
 }
 
-/* PopoverMenu 菜单项 */
+.popover-menu-item:hover:not([aria-disabled='true']) {
+  background: var(--glass-chip-hover);
+  color: var(--text-primary);
+}
+
+.popover-menu-item:active:not([aria-disabled='true']) {
+  transform: scale(0.98);
+}
+
+.popover-menu-item[aria-disabled='true'] {
+  color: var(--text-muted);
+  cursor: default;
+  pointer-events: none;
+}
+
+.popover-menu-item.active {
+  background: var(--accent-primary-soft);
+  color: var(--accent-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
 .popover-menu-level {
   position: relative;
   display: flex;
@@ -2356,52 +2114,12 @@
   position: relative;
 }
 
-.popover-menu-item {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  width: 100%;
-  min-height: 30px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-weight: var(--font-weight-regular);
-  line-height: 1.3;
-  color: var(--text-secondary);
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--duration-micro), color var(--duration-micro);
-}
-
-.popover-menu-item:hover:not([aria-disabled='true']) {
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
-}
-
-.popover-menu-item.active {
-  background: var(--bg-active);
-  color: var(--accent-primary);
-  font-weight: var(--font-weight-semibold);
-}
-
-.popover-menu-item:focus-visible {
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
-}
-
-.popover-menu-item[aria-disabled='true'] {
-  color: var(--text-muted);
-  cursor: default;
-  pointer-events: none;
-}
-
 .popover-menu-item-icon {
   display: inline-flex;
-  flex-shrink: 0;
-  color: var(--text-tertiary);
-  width: 18px;
   justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  color: var(--text-tertiary);
 }
 
 .popover-menu-item-icon .menu-icon-accent {
@@ -2409,15 +2127,15 @@
 }
 
 .popover-menu-playlist-cover {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-sm);
   overflow: hidden;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-xs);
 }
 
 .popover-menu-playlist-cover img,
@@ -2433,8 +2151,8 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: left;
   white-space: nowrap;
+  text-align: left;
 }
 
 .popover-menu-check {
@@ -2445,11 +2163,10 @@
 }
 
 .popover-menu-arrow {
-  font-size: 13px;
+  flex-shrink: 0;
+  font-size: var(--text-sm);
   line-height: 1;
   color: var(--text-tertiary);
-  flex-shrink: 0;
-  transform: rotate(0deg);
 }
 
 .popover-menu-arrow.flip {
@@ -2458,202 +2175,816 @@
 
 .popover-menu-divider {
   height: 1px;
+  margin: 5px 4px;
   background: var(--border-subtle);
-  margin: 4px 0;
 }
 
 .popover-menu-submenu {
   position: absolute;
   top: 0;
-  left: calc(100% + 6px);
-  width: max-content;
-  min-width: 0;
-  max-width: min(320px, calc(100vw - 32px));
-  max-height: min(320px, calc(100vh - 16px));
+  left: calc(100% + 10px);
+  width: 248px;
+  max-height: min(380px, calc(100vh - 16px));
   overflow-y: auto;
-  padding: 5px;
-  background: var(--popover-bg);
-  backdrop-filter: var(--blur-strong);
-  -webkit-backdrop-filter: var(--blur-strong);
+  padding: 8px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel-solid);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
   box-shadow: var(--shadow-float);
 }
 
+.popover-menu-submenu {
+  width: max-content;
+  min-width: 0;
+  max-width: min(360px, calc(100vw - 32px));
+}
+
 .popover-menu-submenu.opens-left {
-  right: calc(100% + 6px);
+  right: calc(100% + 10px);
   left: auto;
 }
 
+/* 歌单广场"全部分类"面板 */
 .all-categories-panel {
-  min-width: 236px;
-  max-width: 300px;
-  max-height: 360px;
-  overflow-y: auto;
-  padding: 12px;
-  border-radius: var(--radius-lg);
+  position: fixed;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  animation: popoverMount 200ms var(--ease-desktop-out) forwards;
+  gap: 16px;
+  min-width: 280px;
+  max-width: 360px;
+  /* 6 组 × 71 项，420px 只能显示一半且底部硬切。
+     可用高度必须扣掉播放坞（--stage-bottom），否则面板底部会被坞压住。 */
+  max-height: min(60vh, calc(100vh - var(--stage-bottom) - 120px));
+  overflow-y: auto;
+  padding: 18px;
+  border-radius: var(--radius-xl);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* 底部渐隐：提示"下面还有分类"，避免硬切看起来像被截断 */
+  mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 28px), transparent 100%);
+}
+
+.all-categories-panel::-webkit-scrollbar {
+  display: none;
 }
 
 .all-categories-group {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .all-categories-group-title {
-  font-size: 11px;
+  padding: 0 4px;
+  font-size: var(--text-2xs);
   font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--text-tertiary);
-  padding: 2px 4px;
-  letter-spacing: 0.3px;
 }
 
 .all-categories-items {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
+  gap: 8px;
 }
 
 .all-categories-items .popover-menu-item {
-  font-size: 11.5px;
-  padding: 6px 8px;
-  background: var(--bg-card);
-  border-radius: var(--radius-sm);
   justify-content: center;
+  padding: 9px 10px;
+  background: var(--glass-chip);
+  border: 1px solid var(--glass-stroke);
+  font-size: var(--text-xs);
   text-align: center;
-  border: 1px solid var(--border-subtle);
-  transition: background 160ms var(--ease-desktop-out), border-color 160ms var(--ease-desktop-out), transform 160ms var(--ease-desktop-out), box-shadow 160ms var(--ease-desktop-out);
 }
 
 .all-categories-items .popover-menu-item:hover {
-  background: var(--bg-card-hover);
-  border-color: var(--accent-primary);
-  color: var(--text-primary);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
+  background: var(--glass-chip-hover);
 }
 
 .all-categories-items .popover-menu-item.active {
-  background: var(--accent-gradient);
-  color: #fff;
+  /* 分类面板里的"当前分类"用中性反色，不再用品牌渐变：
+     否则面板打开时"全部分类"按钮 + "全部歌单"项会同时粉紫，语义冲突 */
+  background: var(--text-primary);
   border-color: transparent;
+  color: var(--bg-panel-solid);
   font-weight: var(--font-weight-semibold);
 }
 
-/* Toast 通知 */
+/* ============================================================
+   8. Toast 与统一弹窗体系
+   ============================================================ */
 .toast {
   position: fixed;
-  top: 68px;
+  /* 顶栏高 66px：Toast 必须落在其下方，否则会压住搜索框与窗口按钮 */
+  top: calc(var(--chrome-top) + 10px);
   left: 50%;
   z-index: var(--z-toast);
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: min(520px, calc(100vw - 48px));
-  padding: 10px 16px;
+  gap: 12px;
+  max-width: min(600px, calc(100vw - 48px));
+  padding: 13px 20px;
   border-radius: var(--radius-pill);
-  background: var(--toast-bg);
+  background: var(--bg-panel-solid);
   color: var(--toast-text);
   border: 1px solid var(--toast-border);
   box-shadow: var(--toast-shadow);
-  font-size: 13px;
-  font-weight: var(--font-weight-regular);
-  transform: translate(-50%, -8px);
+  font-size: var(--text-md);
+  font-weight: var(--font-weight-medium);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 320ms var(--ease-desktop-out), transform 320ms var(--ease-desktop-out);
+  transform: translate(-50%, -16px) scale(0.95);
+  /* 退出用 --ease-out（收得干净），进入同样走 spring 的轻过冲：
+     用一条曲线兼顾进出会牺牲其中一端，这里按 data-open 分别指定。 */
+  transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-out);
 }
 
 .toast[data-open='true'] {
-  transform: translate(-50%, 0);
   opacity: 1;
   pointer-events: auto;
+  transform: translate(-50%, 0) scale(1);
+  transition: opacity var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-spring);
 }
 
 .toast-icon {
   flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 5px;
+  border-radius: 50%;
+  box-sizing: content-box;
+  background: var(--glass-chip-hover);
 }
 
-.toast[data-tone='success'] .toast-icon { color: var(--color-success); }
-.toast[data-tone='warning'] .toast-icon { color: var(--color-warning); }
-.toast[data-tone='error'] .toast-icon { color: var(--color-danger); }
-.toast[data-tone='info'] .toast-icon { color: var(--text-secondary); }
+.toast[data-tone='success'] .toast-icon { color: var(--color-success); background: var(--color-success-soft); }
+.toast[data-tone='warning'] .toast-icon { color: var(--color-warning); background: var(--color-warning-soft); }
+.toast[data-tone='error'] .toast-icon { color: var(--color-danger); background: var(--color-danger-soft); }
+.toast[data-tone='info'] .toast-icon { color: var(--color-info); background: var(--color-info-soft); }
 
 .toast-message {
   flex: 1;
   min-width: 0;
+  padding-block: 2px;
   overflow-wrap: break-word;
 }
 
 .toast-action {
   flex-shrink: 0;
-  padding: 4px 12px;
+  padding: 7px 16px;
   border-radius: var(--radius-pill);
   background: var(--btn-solid-bg);
   color: var(--btn-solid-text);
-  font-size: 12px;
-  font-weight: var(--font-weight-semibold);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-bold);
+  transition: transform var(--duration-micro) var(--ease-out), filter var(--duration-micro);
+}
+
+@media (hover: hover) {
+  .toast-action:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.06);
+  }
+}
+
+.toast-action:active {
+  transform: scale(0.98);
 }
 
 .toast-close {
   flex-shrink: 0;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   color: var(--text-tertiary);
-  transition: background var(--duration-micro), color var(--duration-micro);
+  transition: background var(--duration-micro), color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
 }
 
 .toast-close:hover {
-  background: var(--bg-card-hover);
+  background: var(--glass-chip-hover);
   color: var(--text-primary);
 }
 
 [data-reduce-effects='true'] .toast {
-  transition: opacity 160ms var(--ease-desktop-out);
+  transition: opacity var(--duration-fast) var(--ease-out);
 }
 
-/* 🎯 修正点9：模态框统一 Backdrop 高斯模糊 */
+/* ---- 统一弹窗骨架 ---- */
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: var(--blur-overlay);
-  -webkit-backdrop-filter: var(--blur-overlay);
-  z-index: 2000;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 32px;
+  background: var(--scrim);
+  backdrop-filter: var(--blur-overlay);
+  -webkit-backdrop-filter: var(--blur-overlay);
   opacity: 0;
-  pointer-events: none;
   visibility: hidden;
-  transition: opacity var(--duration-normal) var(--ease-desktop-out), visibility var(--duration-normal);
+  pointer-events: none;
+  transition: opacity var(--duration-base) var(--ease-out), visibility var(--duration-base);
 }
 
 .modal-backdrop.open {
   opacity: 1;
-  pointer-events: auto;
   visibility: visible;
+  pointer-events: auto;
 }
 
 .modal-card {
-  width: 360px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-float);
+  position: relative;
+  width: min(452px, 100%);
   padding: 24px;
-  transform: scale(0.95) translateY(12px);
-  transition: transform var(--duration-normal) var(--ease-desktop-out);
+  border-radius: var(--radius-xl);
+  background: var(--bg-panel-solid);
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-float);
+  overflow: hidden;
+  isolation: isolate;
+  opacity: 0;
+  /* 只做 6px 上浮 + 淡入，不做缩放（缩放弹入是移动端/展示型动画语言） */
+  transform: translateY(6px);
+  transition: transform var(--duration-fast) var(--ease-out),
+              opacity 180ms var(--ease-out);
+}
+
+/* 玻璃高光层已移除：顶部那道白色渐变在扁平体系里是多余的反光 */
+.modal-card::before {
+  display: none;
 }
 
 .modal-backdrop.open .modal-card {
-  transform: scale(1) translateY(0);
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* 尺寸变体（NotificationHost 使用 --sm） */
+.modal-card--sm { width: min(400px, 100%); }
+.modal-card--lg { width: min(600px, 100%); }
+
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 15px;
+  margin-bottom: 22px;
+}
+
+.dialog-icon {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+
+.dialog-icon--avatar {
+  border-radius: var(--radius-md);
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+/* 语义图标用"淡底 + 语义色描边"，不再用高饱和渐变 + 彩色投影 */
+.dialog-icon--warning {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.dialog-icon--danger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.dialog-icon--info {
+  background: var(--color-info-soft);
+  color: var(--color-info);
+}
+
+.dialog-heading {
+  flex: 1;
+  min-width: 0;
+  padding-top: 3px;
+}
+
+.dialog-title {
+  font-family: var(--font-display);
+  font-size: var(--text-h2);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--tracking-snug);
+  line-height: var(--leading-tight);
+  color: var(--text-primary);
+}
+
+.dialog-subtitle {
+  margin-top: 7px;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--text-tertiary);
+}
+
+.dialog-close-btn {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--glass-chip);
+  color: var(--text-secondary);
+  transition: background var(--duration-micro), color var(--duration-micro), transform var(--duration-micro) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .dialog-close-btn:hover {
+    background: var(--glass-chip-hover);
+    color: var(--text-primary);
+    transform: rotate(90deg);
+  }
+}
+
+.dialog-close-btn:active {
+  transform: rotate(90deg) scale(0.98);
+}
+
+.dialog-body {
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--text-secondary);
+}
+
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.dialog-actions--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+[data-reduce-effects='true'] .modal-card {
+  filter: none;
+  transform: none;
+  transition: opacity var(--duration-base) var(--ease-out);
+}
+
+/* ---- 登录弹窗 ---- */
+.login-dialog {
+  width: min(412px, 100%);
+}
+
+.login-dialog .dialog-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.login-provider-toggle {
+  width: 100%;
+  justify-content: center;
+  margin-bottom: 22px;
+}
+
+/* 弹窗里的分段控件用轻量中性底，避免整块黑胶囊压过标题与二维码 */
+.login-provider-toggle .provider-toggle-thumb {
+  /* 选中滑块要比容器底亮一档，否则在深灰底上几乎看不出当前平台 */
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+}
+
+[data-theme='light'] .login-provider-toggle .provider-toggle-thumb {
+  background: #ffffff;
+  border-color: rgba(18, 20, 34, 0.1);
+  box-shadow: 0 2px 8px rgba(18, 20, 34, 0.12);
+}
+
+.login-provider-toggle .provider-btn.active {
+  color: var(--text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.login-provider-toggle .provider-btn {
+  flex: 1;
+  max-width: 174px;
+  padding: 9px 12px;
+  font-size: var(--text-sm);
+}
+
+.login-tab-transition {
+  overflow: hidden;
+  transition: height var(--duration-page) var(--ease-out);
+}
+
+.login-tab-panel {
+  animation: loginTabIn var(--duration-page) var(--ease-emphasized) both;
+}
+
+@keyframes loginTabIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: none;
+  }
+}
+
+[data-reduce-effects='true'] .login-tab-panel {
+  animation: none;
+}
+
+.login-qr-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding-top: 2px;
+}
+
+.login-qr-frame {
+  position: relative;
+  width: 206px;
+  height: 206px;
+  border-radius: var(--radius-md);
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  /* 二维码识别区：白底 + 一圈中性描边即可。
+     之前的 18px 大投影 + 1px 光环让它像一张浮起来的卡片。 */
+  box-shadow: inset 0 0 0 1px var(--border-light);
+  transition: box-shadow var(--duration-micro) var(--ease-out);
+}
+
+.login-qr-frame.is-waiting,
+.login-qr-frame.is-scanned {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.login-qr-img,
+.login-qr-canvas {
+  width: 176px;
+  height: 176px;
+  display: block;
+  animation: loginQrIn var(--duration-page) var(--ease-out) both;
+}
+
+@keyframes loginQrIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.login-qr-scanline {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 14px;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, transparent, var(--accent-primary) 20%, var(--accent-primary) 80%, transparent);
+  box-shadow: 0 0 10px 1px color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  animation: loginQrScan 2.6s var(--ease-in-out) infinite;
+}
+
+.login-qr-scanline::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 24px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-primary) 14%, transparent), transparent);
+  filter: blur(2px);
+}
+
+@keyframes loginQrScan {
+  0% { transform: translateY(0); opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { transform: translateY(172px); opacity: 0; }
+}
+
+.login-qr-spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-qr-spinner-ring {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--accent-primary) 18%, transparent);
+  border-top-color: var(--accent-primary);
+  animation: loginQrSpin 900ms linear infinite;
+}
+
+@keyframes loginQrSpin {
+  to { transform: rotate(360deg); }
+}
+
+.login-qr-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 18px;
+  text-align: center;
+  background: rgba(8, 9, 15, 0.84);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: loginQrIn var(--duration-base) var(--ease-out) both;
+}
+
+.login-qr-overlay-text {
+  color: var(--on-media);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+.login-qr-overlay-btn {
+  padding: 9px 18px;
+  font-size: var(--text-sm);
+}
+
+.login-qr-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  transition: color var(--duration-micro);
+}
+
+.login-qr-status[data-state='scanned'],
+.login-qr-status[data-state='success'] {
+  color: var(--color-success);
+}
+
+.login-qr-status-icon {
+  /* 二维码上方的状态图标用中性色：粉色图标+白色二维码会形成彩色噪点，
+     只有"已扫码/成功"才切换成绿色反馈 */
+  color: var(--text-tertiary);
+  animation: loginStatusPulse 1.6s var(--ease-in-out) infinite;
+}
+
+.login-qr-status[data-state='scanned'] .login-qr-status-icon,
+.login-qr-status[data-state='success'] .login-qr-status-icon {
+  color: var(--color-success);
+}
+
+@keyframes loginStatusPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.92); }
+}
+
+.login-qr-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.login-qr-actions .btn-secondary,
+.login-qr-actions .btn-ghost {
+  /* 两个并列动作等宽：否则"刷新二维码"比"使用浏览器登录"窄 17px，
+     底部按钮组看起来是歪的 */
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+  padding: 10px 18px;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.login-qr-footnote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.login-account-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0 2px;
+  animation: loginTabIn var(--duration-page) var(--ease-emphasized) both;
+}
+
+.login-account-avatar {
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4), 0 0 0 3px var(--bg-panel), 0 0 0 6px var(--accent-primary-soft);
+}
+
+.login-account-avatar--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-gradient);
+  color: var(--on-accent);
+  font-size: var(--text-display);
+  font-weight: var(--font-weight-bold);
+}
+
+.login-account-name {
+  font-family: var(--font-display);
+  font-size: var(--text-h2);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--tracking-snug);
+  color: var(--text-primary);
+}
+
+.login-account-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* 徽章：中性底 + 1px 描边，语义只体现在文字色上。
+   之前 --ok / --vip 用整块彩色底填充，在全中性的界面里
+   像两颗贴上去的彩色贴纸。 */
+.login-account-badge {
+  padding: 2px 9px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  font-weight: var(--font-weight-regular);
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+}
+
+.login-account-badge--provider {
+  color: var(--text-secondary);
+}
+
+.login-account-badge--vip {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 34%, transparent);
+}
+
+.login-account-badge--ok {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 34%, transparent);
+}
+
+.login-account-badge--warn {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 34%, transparent);
+}
+
+.login-account-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.login-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.login-account-actions .btn-secondary,
+.login-account-actions .btn-ghost {
+  padding: 10px 20px;
+  font-size: var(--text-sm);
+}
+
+.login-account-logout:hover {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+[data-reduce-effects='true'] .login-qr-scanline,
+[data-reduce-effects='true'] .login-qr-spinner-ring,
+[data-reduce-effects='true'] .login-qr-status-icon {
+  animation: none;
+}
+
+[data-reduce-effects='true'] .login-qr-scanline {
+  display: none;
+}
+
+/* ============================================================
+   9. 统一按钮体系
+   ------------------------------------------------------------
+   原则：实心只给唯一主操作，其余用描边或纯文字；
+   不做位移弹跳（translateY + scale 的 hover 是典型"AI 味"），
+   只做背景色变化；圆角 6px 而非胶囊。
+   ============================================================ */
+.btn-primary,
+.btn-secondary,
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  transition: background-color var(--duration-micro) var(--ease-out),
+              border-color var(--duration-micro) var(--ease-out),
+              color var(--duration-micro) var(--ease-out);
+}
+
+/* 主操作：中性反色实心 */
+.btn-primary {
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-text);
+  font-weight: var(--font-weight-medium);
+  border: 1px solid transparent;
+}
+
+.btn-primary:hover {
+  background: var(--btn-solid-hover);
+}
+
+.btn-primary:active {
+  background: var(--btn-solid-hover);
+}
+
+.btn-primary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 次操作：描边 */
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+}
+
+.btn-secondary:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.btn-secondary:active {
+  background: var(--surface-3);
+}
+
+/* 三级：纯文字 */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  padding: 0 10px;
+}
+
+.btn-ghost:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.btn-ghost:active {
+  background: var(--surface-3);
+}
+
+/* ============================================================
+   10. 全局动画关键帧（被 views 复用）
+   ============================================================ */
+@keyframes itemBlurIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes contentFadeIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
