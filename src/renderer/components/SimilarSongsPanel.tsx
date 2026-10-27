@@ -5,9 +5,10 @@ import { useUiStore } from '../state/uiStore';
 import { useNotificationStore } from '../state/notificationStore';
 import { useSongContextMenu } from '../hooks/useSongContextMenu';
 import { PopoverMenu } from './PopoverMenu';
+import { CoverImage } from './CoverImage';
 import { formatDuration } from '../utils/format';
-import { onImageReveal, imageRevealRef } from '../utils/imageReveal';
 import { toThumbnailUrl } from '../utils/remoteCover';
+import { CloseIcon } from './icons';
 
 export function SimilarSongsPanel() {
   const currentSong = usePlayerStore((s) => s.currentSong);
@@ -89,21 +90,30 @@ export function SimilarSongsPanel() {
       <div className={`drawer-panel ${isOpen ? 'open' : ''}`} data-drawer-panel="similar">
         <div className="drawer-header">
           <h3 className="drawer-title">相似歌曲推荐</h3>
-          <button className="section-action-btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={loadSimilar}>
-            换一批
-          </button>
+          <div className="drawer-header-actions">
+            <button className="section-action-btn drawer-action-btn" onClick={loadSimilar}>
+              换一批
+            </button>
+            <button
+              className="drawer-close-btn"
+              type="button"
+              aria-label="关闭相似歌曲推荐"
+              title="关闭"
+              onClick={() => setSimilarOpen(false)}
+            >
+              <CloseIcon size={14} strokeWidth={2.2} />
+            </button>
+          </div>
         </div>
-        <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: 10 }}>
+        <div className="drawer-subtitle">
           {currentSong ? `基于当前收听《${currentSong.title}》智能生成` : '暂无可推荐内容'}
         </div>
         <div className="queue-song-list">
           {isLoading && songs.length === 0 && (
-            <div style={{ padding: 24, textAlign: 'center', fontSize: 12.5, color: 'var(--text-tertiary)' }}>加载中...</div>
+            <div className="drawer-status">加载中...</div>
           )}
           {!isLoading && songs.length === 0 && (
-            <div style={{ padding: 24, textAlign: 'center', fontSize: 12.5, color: 'var(--text-tertiary)' }}>
-              暂无相似歌曲推荐
-            </div>
+            <div className="drawer-status">暂无相似歌曲推荐</div>
           )}
           {songs.map((song) => (
             <SimilarSongItem
@@ -164,11 +174,13 @@ function SimilarSongItem({
         setContextMenu({ x: event.clientX, y: event.clientY, cursorAnchored: true });
       }}
     >
-      {song.coverUrl ? (
-        <img className="queue-song-cover" ref={imageRevealRef} src={toThumbnailUrl(song.coverUrl)} alt="" loading="lazy" onLoad={onImageReveal} onError={onImageReveal} />
-      ) : (
-        <div className="queue-song-cover" style={{ background: song.coverTone || 'var(--bg-card)' }} />
-      )}
+      <CoverImage
+        className="queue-song-cover"
+        src={song.coverUrl}
+        tone={song.coverTone}
+        size={88}
+        fallbackIconSize={16}
+      />
       <div className="queue-song-meta">
         <div className="queue-song-title">{song.title}</div>
         <div className="queue-song-artist">{song.artist}</div>

@@ -8,6 +8,7 @@ import { useLibraryStore } from './state/libraryStore';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { PlayerBar } from './components/PlayerBar';
+import { ScrollIndicator } from './components/ScrollIndicator';
 import { AudioEngine } from './components/AudioEngine';
 import { LyricsPanel } from './components/LyricsPanel';
 import { QueuePanel } from './components/QueuePanel';
@@ -20,6 +21,7 @@ import { ChartsView } from './components/views/ChartsView';
 import { PlaylistDiscoveryView } from './components/views/PlaylistDiscoveryView';
 import { PlaylistDetailView } from './components/views/PlaylistDetailView';
 import { ListeningHistoryView } from './components/views/ListeningHistoryView';
+import { MusicDnaView } from './components/views/MusicDnaView';
 import { useMediaSession } from './hooks/useMediaSession';
 import { useTrayPlaybackControls } from './hooks/useTrayPlaybackControls';
 import { useReducedEffects, useThemeSync } from './hooks/useTheme';
@@ -51,6 +53,8 @@ export function App() {
   const loadProviderPlaylists = useLibraryStore((s) => s.loadProviderPlaylists);
   const [loginOpen, setLoginOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  /** 用户是否手动展开过侧栏：手动展开后不再被窗口宽度自动收起 */
+  const sidebarManuallyExpandedRef = useRef(false);
   const [loginProviderId, setLoginProviderId] = useState<RemoteProviderId | undefined>();
   const [lyricsTransition, setLyricsTransition] = useState<{
     origin: LyricsTransitionOrigin;
@@ -82,9 +86,38 @@ export function App() {
     useUiStore.getState().navigateToView('search', { keyword });
   }, []);
 
+  // 最小窗口 1040px 时，258px 侧栏会占掉 25% 宽度，主内容只剩 756px。
+  // 宽度不足 1100px 时自动收起侧栏；用户手动展开后不再强制收起。
+  useEffect(() => {
+    const NARROW = 1100;
+    const applyWidth = () => {
+      if (window.innerWidth < NARROW && !sidebarManuallyExpandedRef.current) {
+        setSidebarCollapsed(true);
+      } else if (window.innerWidth >= NARROW) {
+        sidebarManuallyExpandedRef.current = false;
+        setSidebarCollapsed(false);
+      }
+    };
+    applyWidth();
+    window.addEventListener('resize', applyWidth);
+    return () => window.removeEventListener('resize', applyWidth);
+  }, []);
+
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((collapsed) => {
+      const next = !collapsed;
+      // 手动展开时记一笔，之后窗口变窄也不再自动收起
+      sidebarManuallyExpandedRef.current = !next;
+      return next;
+    });
+  }, []);
+
   const handleOpenLogin = useCallback((providerId?: RemoteProviderId) => {
     const activeProviderId = useProviderSessionStore.getState().activeProviderId;
-    setLoginProviderId(providerId ?? (activeProviderId === 'netease' || activeProviderId === 'qq' ? activeProviderId : 'netease'));
+    // 防御：任何调用点都可能误传事件对象等非字符串值（如 onClick 直传），
+    // 非法的 providerId 会让登录弹窗把事件对象当作平台 ID 发给主进程
+    const requested = providerId === 'netease' || providerId === 'qq' ? providerId : undefined;
+    setLoginProviderId(requested ?? (activeProviderId === 'netease' || activeProviderId === 'qq' ? activeProviderId : 'netease'));
     setLoginOpen(true);
   }, []);
 
@@ -165,6 +198,8 @@ export function App() {
         return <PlaylistDetailView key={`rec-${params.collectionId}`} providerId={providerId as 'netease' | 'qq'} playlistId={params.collectionId} title={params.title} kind="recommendation" />;
       case 'listeningHistory':
         return <ListeningHistoryView key="history" />;
+      case 'musicDna':
+        return <MusicDnaView key="music-dna" />;
       default:
         if (providerId === 'local') {
           return (
@@ -206,20 +241,39 @@ export function App() {
   const currentSong = usePlayerStore((s) => s.currentSong);
   const [canLocatePlaying, setCanLocatePlaying] = useState(false);
 
+  // 旧版的"极光环境层"与"模糊封面铺底"已随 Studio 体系移除：
+  // 界面不再随封面变色，--aurora-* / --ambient-art 两个变量不再被任何样式消费，
+  // 这里连同 toAuroraColor 一并删除，避免每帧写入无人读取的自定义属性。
+
   useEffect(() => {
     if (!currentSong) {
       setCanLocatePlaying(false);
       return;
     }
+    // 只在"当前歌曲已经滚出可视区"时才显示定位按钮。
+    // 之前只要该歌曲存在于 DOM 就显示，导致停在页面顶部时
+    // 按钮也会浮在表格右缘上方，遮挡内容且没有意义。
     const check = () => {
-      const el = mainRef.current?.querySelector<HTMLElement>(
+      const container = mainRef.current;
+      const el = container?.querySelector<HTMLElement>(
         `[data-song-provider="${currentSong.providerId}"][data-song-id="${CSS.escape(currentSong.id)}"]`
       );
-      setCanLocatePlaying(Boolean(el));
+      if (!container || !el) {
+        setCanLocatePlaying(false);
+        return;
+      }
+      const rowRect = el.getBoundingClientRect();
+      const boxRect = container.getBoundingClientRect();
+      const outOfView = rowRect.bottom < boxRect.top || rowRect.top > boxRect.bottom;
+      setCanLocatePlaying(outOfView);
     };
     check();
-    const id = window.setInterval(check, 1200);
-    return () => window.clearInterval(id);
+    const id = window.setInterval(check, 600);
+    mainRef.current?.addEventListener('scroll', check, { passive: true });
+    return () => {
+      window.clearInterval(id);
+      mainRef.current?.removeEventListener('scroll', check);
+    };
   }, [currentSong?.id, currentSong?.providerId, currentView]);
 
   const locatePlaying = () => {
@@ -236,9 +290,17 @@ export function App() {
 
   return (
     <div className={`app-layout${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+      <div className="app-ambient" aria-hidden="true">
+        <span className="aurora-veil" />
+        <span className="aurora-grain" />
+      </div>
+
+      <div className="titlebar-drag" aria-hidden="true" />
+
       <Sidebar
         collapsed={sidebarCollapsed}
-        onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
+        onToggleCollapsed={toggleSidebarCollapsed}
+        onOpenLogin={() => handleOpenLogin()}
       />
 
       <TopBar onSearch={handleSearch} onOpenLogin={handleOpenLogin} />
@@ -250,6 +312,8 @@ export function App() {
           </div>
         </div>
       </main>
+
+      <ScrollIndicator targetRef={mainRef} />
 
       <button
         className={`scroll-to-playing-btn ${canLocatePlaying ? 'visible' : ''}`}

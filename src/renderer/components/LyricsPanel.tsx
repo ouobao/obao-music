@@ -2,7 +2,6 @@ import { ChevronDown, Languages, Menu } from 'lucide-react';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import { Fragment, type CSSProperties, type MouseEvent, type RefObject, type WheelEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { findActiveLyricLine, getLyricCharStartMs, getLyricLineProgress, parseLrc } from '../lyrics/lyricsTimeline';
 import { createTranslationMap } from '../lyrics/lyricsTranslation';
 import {
@@ -131,13 +130,6 @@ export function LyricsPanel({
   const panelRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLElement | null>(null);
   const artworkRef = useRef<HTMLDivElement | null>(null);
-  const transitionAppVignetteRef = useRef<HTMLDivElement | null>(null);
-  const transitionFlightRef = useRef<HTMLDivElement | null>(null);
-  const transitionBobRef = useRef<HTMLDivElement | null>(null);
-  const transitionGlowRef = useRef<HTMLDivElement | null>(null);
-  const transitionShadowRef = useRef<HTMLDivElement | null>(null);
-  const transitionRippleRef = useRef<HTMLDivElement | null>(null);
-  const transitionDisplacementRef = useRef<SVGFEDisplacementMapElement | null>(null);
   const transitionHoverTimelineRef = useRef<gsap.core.Timeline | null>(null);
   const transitionGlowTimelineRef = useRef<gsap.core.Timeline | null>(null);
   const transitionBusyRef = useRef(false);
@@ -390,26 +382,12 @@ export function LyricsPanel({
     const sideTools = sideToolsRef.current;
     const stage = stageRef.current;
     const artwork = artworkRef.current;
-    const appVignette = transitionAppVignetteRef.current;
-    const flight = transitionFlightRef.current;
-    const bob = transitionBobRef.current;
-    const glow = transitionGlowRef.current;
-    const shadow = transitionShadowRef.current;
-    const ripple = transitionRippleRef.current;
-    const displacement = transitionDisplacementRef.current;
     const overlay = panel.closest<HTMLElement>('.lyrics-overlay');
     const coverEnter = panel.querySelector<HTMLElement>('.lyrics-artwork-container');
     const titleEnter = panel.querySelector<HTMLElement>('.lyrics-artwork-meta');
     const textEnter = panel.querySelector<HTMLElement>('.lyrics-scroll-zone');
     const linesEnter = panel.querySelector<HTMLElement>('.lyrics-scroll-container');
     const sourceCover = document.querySelector<HTMLElement>('.song-cover-wrapper');
-    const edges = flight ? Array.from(flight.querySelectorAll<HTMLElement>('.lyrics-transition-edge')) : [];
-    const refractionTargets = [
-      panel.querySelector<HTMLElement>('.lyrics-header'),
-      panel.querySelector<HTMLElement>('.lyrics-header-actions'),
-      titleEnter,
-      textEnter
-    ].filter((element): element is HTMLElement => element !== null);
 
     if (
       !backdrop
@@ -417,15 +395,7 @@ export function LyricsPanel({
       || !sideTools
       || !stage
       || !artwork
-      || !appVignette
-      || !flight
-      || !bob
-      || !glow
-      || !shadow
-      || !ripple
-      || !displacement
       || !overlay
-      || edges.length !== 4
       || !coverEnter
       || !titleEnter
       || !textEnter
@@ -444,16 +414,7 @@ export function LyricsPanel({
       titleEnter,
       textEnter,
       linesEnter,
-      appVignette,
-      flight,
-      bob,
-      glow,
-      shadow,
-      edges,
-      ripple,
-      displacement,
-      sourceCover,
-      refractionTargets
+      sourceCover
     };
     return { artwork, elements };
   }
@@ -638,22 +599,6 @@ export function LyricsPanel({
             gsap.set([elements.toolbar, elements.sideTools], {
               clearProps: 'transform,translate,rotate,scale,x,y,z,opacity,visibility,filter'
             });
-            gsap.set(
-              [
-                elements.appVignette,
-                elements.flight,
-                elements.glow,
-                elements.shadow,
-                elements.ripple,
-                ...elements.edges
-              ],
-              {
-                autoAlpha: 0,
-                clearProps: 'transform,translate,rotate,scale,x,y,z,rotation,rotationX,rotationY,skewX,filter,clipPath'
-              }
-            );
-            gsap.set(elements.refractionTargets, { filter: 'none' });
-            gsap.set(elements.displacement, { attr: { scale: 0 } });
             if (elements.sourceCover) {
               gsap.set(elements.sourceCover, { clearProps: 'opacity,visibility' });
             }
@@ -1099,6 +1044,11 @@ export function LyricsPanel({
 
     const updateAnchorSpaces = () => {
       const viewportSize = viewport.clientHeight || 540;
+      // 滚动留白按锚点比例写入 CSS：留白不足时首尾几行永远到不了锚点位置
+      // （旧实现写死 200/240px，仅对 ≤455px 高的歌词视口成立）。
+      const spaces = getLyricAnchorSpaces(viewportSize);
+      viewport.style.setProperty('--lyrics-pad-head', `${Math.round(spaces.head)}px`);
+      viewport.style.setProperty('--lyrics-pad-tail', `${Math.round(spaces.tail)}px`);
       setLyricsVirtualViewport((current) => (
         current.viewportSize === viewportSize
           ? current
@@ -1439,25 +1389,6 @@ export function LyricsPanel({
 
   return (
     <>
-      {typeof document !== 'undefined' ? createPortal(
-        <div
-          className="lyrics-transition-flight"
-          aria-hidden="true"
-          ref={transitionFlightRef}
-          style={transitionLayerStyle}
-        >
-          <div className="lyrics-transition-glow" ref={transitionGlowRef} />
-          <div className="lyrics-transition-bob" ref={transitionBobRef}>
-            <div className="lyrics-transition-shadow" ref={transitionShadowRef} />
-            <div className="lyrics-transition-card" />
-            <div className="lyrics-transition-edge lyrics-transition-edge-top" />
-            <div className="lyrics-transition-edge lyrics-transition-edge-right" />
-            <div className="lyrics-transition-edge lyrics-transition-edge-bottom" />
-            <div className="lyrics-transition-edge lyrics-transition-edge-left" />
-          </div>
-        </div>,
-        document.body
-      ) : null}
       <section
       className={`lyrics-overlay${chromeState === 'hidden' ? ' chrome-hidden' : ''}`}
       role="dialog"
@@ -1469,40 +1400,11 @@ export function LyricsPanel({
       style={transitionLayerStyle}
     >
       <div
-        className="lyrics-transition-app-vignette"
-        aria-hidden="true"
-        ref={transitionAppVignetteRef}
-        style={transitionLayerStyle}
-      />
-      <div
         className="lyrics-panel"
         ref={panelRef}
         style={{ '--lyrics-scale': String(fontScale) } as DepthStyle}
         onMouseMove={handlePanelPointerMove}
       >
-        <div className="lyrics-transition-ripple" aria-hidden="true" ref={transitionRippleRef} />
-        <svg className="lyrics-transition-filter-defs" aria-hidden="true" focusable="false">
-          <defs>
-            <filter id="lyricsWaterRippleFilter" x="-12%" y="-12%" width="124%" height="124%" colorInterpolationFilters="sRGB">
-              <feTurbulence
-                type="fractalNoise"
-                baseFrequency="0.009 0.028"
-                numOctaves={1}
-                seed={17}
-                result="lyricsWaterRippleNoise"
-              />
-              <feDisplacementMap
-                id="lyricsWaterRippleDisplacement"
-                ref={transitionDisplacementRef}
-                in="SourceGraphic"
-                in2="lyricsWaterRippleNoise"
-                scale="0"
-                xChannelSelector="R"
-                yChannelSelector="G"
-              />
-            </filter>
-          </defs>
-        </svg>
         <div className="lyrics-dynamic-bg" aria-hidden="true">
           <span className="lyrics-glow-orb lyrics-glow-1" />
           <span className="lyrics-glow-orb lyrics-glow-2" />
@@ -2585,16 +2487,7 @@ interface LyricsTransitionElements {
   titleEnter: HTMLElement;
   textEnter: HTMLElement;
   linesEnter: HTMLElement;
-  appVignette: HTMLDivElement;
-  flight: HTMLDivElement;
-  bob: HTMLDivElement;
-  glow: HTMLDivElement;
-  shadow: HTMLDivElement;
-  edges: HTMLElement[];
-  ripple: HTMLDivElement;
-  displacement: SVGElement;
   sourceCover: HTMLElement | null;
-  refractionTargets: HTMLElement[];
 }
 
 interface LyricsPortalGeometry {
@@ -2665,62 +2558,13 @@ function measureNeutralArtworkRect(
   }
 }
 
-function prepareTransitionLayers(elements: LyricsTransitionElements, origin: LyricsTransitionOrigin) {
-  gsap.set(elements.appVignette, { autoAlpha: 0, '--app-blur': '0px' });
-  gsap.set(elements.flight, {
-    // Flight coordinates are viewport-relative; keep the fixed layer at the viewport origin.
-    left: 0,
-    top: 0,
-    width: origin.width,
-    height: origin.height,
-    x: 0,
-    y: 0,
-    scale: 1,
-    rotation: 0,
-    rotationX: 0,
-    rotationY: 0,
-    autoAlpha: 0
-  });
-  gsap.set(elements.bob, {
-    x: 0,
-    y: 0,
-    z: 0,
-    scale: 1,
-    rotation: 0,
-    rotationX: 0,
-    rotationY: 0,
-    filter: 'blur(0px)'
-  });
-  gsap.set(elements.glow, { autoAlpha: 0, scale: 0.82 });
-  gsap.set(elements.shadow, { autoAlpha: 0, scale: 0.72 });
-  gsap.set(elements.edges, { autoAlpha: 0, rotationX: 0, rotationY: 0, z: 0, filter: 'brightness(1)' });
-  gsap.set(elements.ripple, {
-    autoAlpha: 0,
-    '--ripple-x': '50%',
-    '--ripple-y': '50%',
-    '--ripple-radius': '180px'
-  });
-  gsap.set(elements.refractionTargets, { filter: 'none' });
-  gsap.set(elements.displacement, { attr: { scale: 0 } });
+function prepareTransitionLayers(_elements: LyricsTransitionElements, _origin: LyricsTransitionOrigin) {
+  // The active lyrics transition is the simple panel slide (`playSimpleSlideEntry`/`Exit`),
+  // which only animates `elements.panel`. The legacy cover-flight / ripple / vignette layers
+  // were permanently hidden in CSS and have been removed.
 }
 
 function cleanupTransitionLayers(elements: LyricsTransitionElements) {
-  gsap.set(
-    [
-      elements.appVignette,
-      elements.flight,
-      elements.glow,
-      elements.shadow,
-      elements.ripple,
-      ...elements.edges
-    ],
-    {
-      autoAlpha: 0,
-      clearProps: 'transform,translate,rotate,scale,x,y,z,rotation,rotationX,rotationY,skewX,filter,clipPath'
-    }
-  );
-  gsap.set(elements.refractionTargets, { filter: 'none' });
-  gsap.set(elements.displacement, { attr: { scale: 0 } });
   restoreTransitionSourceCover(elements.sourceCover);
 }
 
@@ -2832,8 +2676,7 @@ function playReducedMotionExit(
   timeline
     .to([elements.stage, elements.panel], { autoAlpha: 0, yPercent: 0, duration, ease: 'power1.in' }, 0)
     .call(callbacks.onReturn, [], duration * 0.5)
-    .call(callbacks.onRestore, [], duration)
-    .to(elements.appVignette, { autoAlpha: 0, duration: 0.12 }, duration);
+    .call(callbacks.onRestore, [], duration);
 }
 
 /**

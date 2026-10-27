@@ -52,10 +52,11 @@ export function PlaylistDiscoveryView() {
 
   return (
     <div aria-busy={Boolean(loadingCategories)} data-reveal data-reveal-order={0}>
-      <div className="section-header" style={{ marginBottom: 20 }}>
-        <div className="section-title-group">
-          <h1 className="detail-title" style={{ fontSize: 22 }}>歌单广场</h1>
-          <span className="section-sub-title">浏览发现海量优质歌单</span>
+      <div className="page-header">
+        <div className="page-header-main">
+          <span className="page-kicker">{remoteProviderId === 'qq' ? 'QQ 音乐' : '网易云音乐'}</span>
+          <h1 className="detail-title">歌单广场</h1>
+          <span className="page-subtitle">浏览发现海量优质歌单</span>
         </div>
       </div>
 
@@ -69,7 +70,6 @@ export function PlaylistDiscoveryView() {
             <button
               key={cat.id}
               className={`pill-item ${categoryId === cat.id ? 'active' : ''}`}
-              style={categoryId === cat.id ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
               onClick={() => { setActiveCategoryId(cat.id); setAllPanelOpen(false); }}
             >
               {cat.name}
@@ -77,8 +77,7 @@ export function PlaylistDiscoveryView() {
           ))}
           <button
             ref={allButtonRef}
-            className={`pill-item ${allPanelOpen ? 'active' : ''}`}
-            style={allPanelOpen ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
+            className={`pill-item ${allPanelOpen ? 'panel-open' : ''}`}
             onClick={() => setAllPanelOpen((open) => !open)}
             aria-haspopup="menu"
             aria-expanded={allPanelOpen}
@@ -117,15 +116,23 @@ export function PlaylistDiscoveryView() {
 
 function AllCategoriesPanel({ anchorRef, groups, activeCategoryId, onSelect, onClose }: { anchorRef: React.RefObject<HTMLButtonElement | null>; groups: Map<string, PlaylistCategory[]>; activeCategoryId?: string; onSelect: (id: string) => void; onClose: () => void }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [position, setPosition] = useState<{ right: number; top: number; maxHeight: number } | null>(null);
 
   useEffect(() => {
     const anchor = anchorRef.current;
     if (!anchor) return;
     const rect = anchor.getBoundingClientRect();
-    const width = Math.min(420, window.innerWidth - 32);
-    const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    setPosition({ left, top: rect.bottom + 8 });
+    // 用 right 定位：面板宽度由内容决定（280–360px），用 left 计算会把
+    // 右缘算错（按 420 算 → 实际 280，面板整体左移 140px）。
+    // 同时按"锚点下方 → 播放坞上方"的可用空间限制高度，避免面板底部被坞压住。
+    const top = rect.bottom + 8;
+    const dockReserve = 114; // --stage-bottom: 14 + 86 + 14
+    const available = window.innerHeight - top - dockReserve - 8;
+    setPosition({
+      right: Math.max(8, window.innerWidth - rect.right),
+      top,
+      maxHeight: Math.max(160, available)
+    });
   }, [anchorRef]);
 
   useEffect(() => {
@@ -149,7 +156,14 @@ function AllCategoriesPanel({ anchorRef, groups, activeCategoryId, onSelect, onC
       className="popover-menu open all-categories-panel"
       role="menu"
       aria-label="全部分类"
-      style={{ position: 'fixed', left: position?.left ?? 0, top: position?.top ?? 0, bottom: 'auto' }}
+      style={{
+        position: 'fixed',
+        right: position?.right ?? 8,
+        left: 'auto',
+        top: position?.top ?? 0,
+        bottom: 'auto',
+        maxHeight: position?.maxHeight
+      }}
     >
       {Array.from(groups.entries()).map(([group, items]) => (
         <div key={group} className="all-categories-group">
@@ -241,7 +255,7 @@ function CategoryPlaylistGrid({ providerId, categoryId, onOpenPlaylist }: { prov
       {isAppending && <SkeletonCardGrid count={6} />}
       <div ref={loadMoreRef} style={{ height: 1 }} />
       {!hasMore && playlists.length > 0 && (
-        <div style={{ textAlign: 'center', padding: '20px 0', fontSize: 12, color: 'var(--text-muted)' }}>
+        <div className="list-end-note">
           已加载全部 {playlists.length} 个歌单
         </div>
       )}

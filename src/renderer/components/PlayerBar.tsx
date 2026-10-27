@@ -7,6 +7,7 @@ import { useUiStore } from '../state/uiStore';
 import type { CoverPalette } from '../utils/coverPalette';
 import type { Song } from '../../shared/musicTypes';
 import { PlaybackCoreControls, PlaybackExtras } from './PlayerTransport';
+import { MusicNoteIcon } from './icons';
 
 interface PlayerBarProps {
   isSimilarSongsOpen?: boolean;
@@ -24,7 +25,9 @@ const fallbackMedia = {
   title: '未播放歌曲',
   artist: '从歌单或搜索结果中选择音乐',
   album: '',
-  coverTone: 'linear-gradient(135deg, #d84848, #2f6f90)',
+  // 空态不注入任何彩色渐变：中性表面 + 音符图标才是这套体系的语言。
+  // 原来的红蓝渐变会让播放坞左下角出现一块与全站无关的色斑。
+  coverTone: 'var(--surface-2)',
   coverUrl: undefined,
   durationMs: 0
 };
@@ -74,6 +77,9 @@ function PlaybackBar(_props: PlaybackBarProps) {
     '--song-cover-image': createCoverImage(media.coverUrl)
   } as CSSProperties;
 
+  // 空态（无封面）时给一个音符占位，避免只剩一块空灰方块
+  const hasCover = Boolean(media.coverUrl);
+
   return (
     <section
       className={isLyricsSurface ? 'playerbar lyrics-player-bar' : 'playerbar'}
@@ -84,6 +90,7 @@ function PlaybackBar(_props: PlaybackBarProps) {
         {isLyricsSurface ? (
           <span className="song-cover-wrapper" aria-hidden="true" style={coverFrameStyle}>
             <span className="song-cover-img" />
+            {!hasCover && <MusicNoteIcon size={18} strokeWidth={1.6} className="song-cover-placeholder" />}
           </span>
         ) : (
           <button
@@ -95,6 +102,7 @@ function PlaybackBar(_props: PlaybackBarProps) {
             ref={coverButtonRef}
           >
             <span className="song-cover-img" />
+            {!hasCover && <MusicNoteIcon size={18} strokeWidth={1.6} className="song-cover-placeholder" />}
             <span className="song-cover-overlay" aria-hidden="true">
               <Maximize2 size={15} strokeWidth={2.2} />
             </span>
@@ -111,7 +119,12 @@ function PlaybackBar(_props: PlaybackBarProps) {
       </div>
 
       <div className="playerbar-right">
-        <PlaybackExtras onOpenSimilar={handleSimilarToggle} onQueue={toggleQueue} hideSimilar={isLyricsSurface} />
+        <PlaybackExtras
+          onOpenSimilar={handleSimilarToggle}
+          onOpenLyrics={isLyricsSurface ? undefined : handleLyricsOpen}
+          onQueue={toggleQueue}
+          hideSimilar={isLyricsSurface}
+        />
       </div>
     </section>
   );

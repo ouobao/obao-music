@@ -12,6 +12,8 @@ import { useChartsStore } from '../../state/chartsStore';
 import { useArtistCatalogStore } from '../../state/artistCatalogStore';
 import { SectionHeader, MediaCardGrid, type MediaCardData, EmptyState } from '../../components/MediaCards';
 import { SongTable } from '../../components/SongTable';
+import { SongShelf } from '../../components/SongShelf';
+import { CoverImage } from '../../components/CoverImage';
 import { SkeletonCardGrid, SkeletonPills, SkeletonSongRow, SkeletonBlock } from '../../components/Skeleton';
 import { formatDateLabel } from '../../utils/format';
 import { chartUpdateLabel } from '../../utils/providerDisplay';
@@ -93,18 +95,85 @@ export function HomeView({ providerId }: HomeViewProps) {
 
   const showErrorBanner = allSettled && homeSongs.length === 0 && Boolean(feedError || moduleError);
 
+  // Hero：用当日第一首推荐撑起整页的"广告牌"，无数据时退回普通页头
+  const heroList = homeSongs;
+  const heroSong = feed?.dailySongs?.[0] ?? homeSongs[0] ?? null;
+  const playSongsFromList = usePlayerStore((s) => s.playSongsFromList);
+  const enqueueSong = usePlayerStore((s) => s.enqueueSong);
+
   return (
     <div className="home-page" aria-busy={Boolean(loading || discoveryLoading || chartsLoading || extraLoading)}>
-      <div className="section-header" data-reveal data-reveal-order={0}>
-        <div className="section-title-group">
-          <h1 className="section-main-title">
-            {nickname ? `${nickname}，` : ''}推荐
-          </h1>
-          <span className="section-sub-title">
-            {providerId === 'netease' ? '网易云音乐' : 'QQ 音乐'}
-          </span>
+      {heroSong ? (
+        <section
+          className="hero-billboard"
+          data-reveal
+          data-reveal-order={0}
+          data-tone-only={heroSong.coverUrl ? undefined : 'true'}
+          style={
+            {
+              '--hero-art': heroSong.coverUrl ? `url("${heroSong.coverUrl.replace(/"/g, '%22')}")` : 'none',
+              '--hero-tone': heroSong.coverTone
+            } as CSSProperties
+          }
+        >
+          <div className="hero-backdrop" aria-hidden="true" />
+          <div className="hero-scrim" aria-hidden="true" />
+          <div className="hero-cover">
+            <CoverImage
+              className="hero-cover-img"
+              src={heroSong.coverUrl}
+              tone={heroSong.coverTone}
+              alt={heroSong.title}
+              size={520}
+              fallbackIconSize={44}
+            />
+            <button
+              className="hero-play-fab"
+              type="button"
+              title="播放推荐"
+              aria-label="播放推荐"
+              onClick={() => playSongsFromList(heroList, 0)}
+            >
+              <PlayBadgeIcon size={20} strokeWidth={2} filled />
+            </button>
+          </div>
+          <div className="hero-copy">
+            <span className="hero-kicker">{nickname ? `${nickname}，为你精选` : '每日推荐 · 为你精选'}</span>
+            <h1 className="hero-title">{heroSong.title}</h1>
+            <p className="hero-meta">
+              {heroSong.artist}
+              {heroSong.album ? ` · ${heroSong.album}` : ''}
+            </p>
+            <div className="hero-chips">
+              <span className="stat-chip">{heroList.length} 首推荐</span>
+              <span className="stat-chip">{providerId === 'netease' ? '网易云音乐' : 'QQ 音乐'}</span>
+            </div>
+            <div className="hero-actions">
+              <button className="btn-primary" onClick={() => playSongsFromList(heroList, 0)}>
+                <PlayBadgeIcon size={17} strokeWidth={2} filled />
+                立即播放
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  for (const song of heroList.slice(0, 50)) {
+                    enqueueSong(song, 'recommendation');
+                  }
+                }}
+              >
+                全部加入队列
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <div className="page-header" data-reveal data-reveal-order={0}>
+          <div className="page-header-main">
+            <span className="page-kicker">{providerId === 'netease' ? '网易云音乐' : 'QQ 音乐'}</span>
+            <h1 className="page-title">{nickname ? `${nickname}，` : ''}推荐</h1>
+          </div>
         </div>
-      </div>
+      )}
 
       {providerId === 'netease' && <HistoryDailySection />}
 
@@ -134,101 +203,121 @@ export function HomeView({ providerId }: HomeViewProps) {
               ? '推荐内容请求失败了，请检查网络或稍后重试'
               : '请先在右上角登录音乐平台账号，或开始播放歌曲，稍后会自动为您生成个性化推荐'}
           </div>
-          <button className="btn-secondary-action" onClick={() => { refreshFeed(providerId); refreshAllDiscovery(providerId); refreshExtraAll(providerId); }}>
+          <button className="btn-secondary" onClick={() => { refreshFeed(providerId); refreshAllDiscovery(providerId); refreshExtraAll(providerId); }}>
             刷新推荐
           </button>
         </div>
       )}
 
-      <div className="home-section" data-reveal data-reveal-order={2}>
-        {feedStatus === 'loading' && !feed && <SkeletonSongRow rows={4} />}
-        {feed && feed.dailySongs.length > 0 && (
-          <>
-            <SectionHeader title="每日推荐" subtitle="根据您的口味量身定制" />
-            <SongTable songs={feed.dailySongs} origin={{ kind: 'home', providerId }} />
-          </>
-        )}
-      </div>
+      {/* 空模块不再渲染外层 .home-section：无数据时它只有 24px margin-top、
+          高度为 0，首页会因此出现多处 24px 的无效空白（实测 5 处共 120px），
+          并把后面的区块整体推低。 */}
+      {((feedStatus === 'loading' && !feed) || (feed && feed.dailySongs.length > 0)) && (
+        <div className="home-section" data-reveal data-reveal-order={2}>
+          {feedStatus === 'loading' && !feed && <SkeletonSongRow rows={4} />}
+          {feed && feed.dailySongs.length > 0 && (
+            <>
+              <SectionHeader title="每日推荐" subtitle="根据您的口味量身定制" />
+              <SongTable songs={feed.dailySongs} origin={{ kind: 'home', providerId }} />
+            </>
+          )}
+        </div>
+      )}
 
-      <div className="home-section" data-reveal data-reveal-order={3}>
-        {feedStatus === 'loading' && !feed && <SkeletonSongRow rows={8} />}
-        {feed && feed.newSongs.length > 0 && (
-          <>
-            <SectionHeader
-              title="新歌速递"
-              subtitle="今日最新上线"
-              action={<>播放全部</>}
-              onAction={() => usePlayerStore.getState().playSongsFromList(feed.newSongs, 0)}
-            />
-            <SongTable songs={feed.newSongs.slice(0, 8)} origin={{ kind: 'home', providerId }} />
-          </>
-        )}
-      </div>
+      {((feedStatus === 'loading' && !feed) || (feed && feed.newSongs.length > 0)) && (
+        <div className="home-section" data-reveal data-reveal-order={3}>
+          {feedStatus === 'loading' && !feed && <SkeletonSongRow rows={8} />}
+          {feed && feed.newSongs.length > 0 && (
+            <>
+              <SectionHeader
+                title="新歌速递"
+                subtitle="今日最新上线"
+                action={<>播放全部</>}
+                onAction={() => usePlayerStore.getState().playSongsFromList(feed.newSongs, 0)}
+              />
+              <SongShelf songs={feed.newSongs} limit={12} />
+            </>
+          )}
+        </div>
+      )}
 
-      <div className="home-section" data-reveal data-reveal-order={4}>
-        {moduleStatus[`${providerId}:homepage`] === 'loading' && homepageSongs.length === 0 && <SkeletonSongRow rows={8} />}
-        {providerId === 'netease' && homepageSongs.length > 0 && (
-          <>
-            <SectionHeader
-              title="多元旋律之旅"
-              subtitle="网易云音乐编辑精选"
-              action={<>播放全部</>}
-              onAction={() => usePlayerStore.getState().playSongsFromList(homepageSongs, 0)}
-            />
-            <SongTable songs={homepageSongs} origin={{ kind: 'home', providerId }} />
-          </>
-        )}
-      </div>
+      {((moduleStatus[`${providerId}:homepage`] === 'loading' && homepageSongs.length === 0)
+        || (providerId === 'netease' && homepageSongs.length > 0)) && (
+        <div className="home-section" data-reveal data-reveal-order={4}>
+          {moduleStatus[`${providerId}:homepage`] === 'loading' && homepageSongs.length === 0 && <SkeletonSongRow rows={8} />}
+          {providerId === 'netease' && homepageSongs.length > 0 && (
+            <>
+              <SectionHeader
+                title="多元旋律之旅"
+                subtitle="网易云音乐编辑精选"
+                action={<>播放全部</>}
+                onAction={() => usePlayerStore.getState().playSongsFromList(homepageSongs, 0)}
+              />
+              <SongTable songs={homepageSongs} origin={{ kind: 'home', providerId }} />
+            </>
+          )}
+        </div>
+      )}
 
-      <div className="home-section" data-reveal data-reveal-order={5}>
-        {moduleStatus[`${providerId}:continue-exploring`] === 'loading' && continueExploring.length === 0 && <SkeletonSongRow rows={12} />}
-        {continueExploring.length > 0 && (
-          <>
-            <SectionHeader
-              title="继续探索"
-              subtitle="基于您的听歌偏好推荐"
-              action={<>播放全部</>}
-              onAction={() => usePlayerStore.getState().playSongsFromList(continueExploring, 0)}
-            />
-            <SongTable songs={continueExploring} origin={{ kind: 'home', providerId }} />
-          </>
-        )}
-      </div>
+      {((moduleStatus[`${providerId}:continue-exploring`] === 'loading' && continueExploring.length === 0)
+        || continueExploring.length > 0) && (
+        <div className="home-section" data-reveal data-reveal-order={5}>
+          {moduleStatus[`${providerId}:continue-exploring`] === 'loading' && continueExploring.length === 0 && <SkeletonSongRow rows={12} />}
+          {continueExploring.length > 0 && (
+            <>
+              <SectionHeader
+                title="继续探索"
+                subtitle="基于您的听歌偏好推荐"
+                action={<>播放全部</>}
+                onAction={() => usePlayerStore.getState().playSongsFromList(continueExploring, 0)}
+              />
+              <SongTable songs={continueExploring} origin={{ kind: 'home', providerId }} />
+            </>
+          )}
+        </div>
+      )}
 
-      <div className="home-section" data-reveal data-reveal-order={6}>
-        {moduleStatus[`${providerId}:not-listened`] === 'loading' && notListened.length === 0 && <SkeletonSongRow rows={12} />}
-        {notListened.length > 0 && (
-          <>
-            <SectionHeader
-              title="久未收听"
-              subtitle="30 天以上未听的歌曲"
-              action={<>播放全部</>}
-              onAction={() => usePlayerStore.getState().playSongsFromList(notListened, 0)}
-            />
-            <SongTable songs={notListened} origin={{ kind: 'home', providerId }} />
-          </>
-        )}
-      </div>
+      {((moduleStatus[`${providerId}:not-listened`] === 'loading' && notListened.length === 0)
+        || notListened.length > 0) && (
+        <div className="home-section" data-reveal data-reveal-order={6}>
+          {moduleStatus[`${providerId}:not-listened`] === 'loading' && notListened.length === 0 && <SkeletonSongRow rows={12} />}
+          {notListened.length > 0 && (
+            <>
+              <SectionHeader
+                title="久未收听"
+                subtitle="30 天以上未听的歌曲"
+                action={<>播放全部</>}
+                onAction={() => usePlayerStore.getState().playSongsFromList(notListened, 0)}
+              />
+              <SongTable songs={notListened} origin={{ kind: 'home', providerId }} />
+            </>
+          )}
+        </div>
+      )}
 
-      <div className="home-section" data-reveal data-reveal-order={7}>
-        {moduleStatus[`${providerId}:new-albums`] === 'loading' && newAlbums.length === 0 && <SkeletonCardGrid count={6} />}
-        <AlbumSection
-          title="新碟速递"
-          albums={newAlbums}
-          providerId={providerId}
-          onOpenAlbum={(album) => navigateToView('album', { providerId, albumId: album.id, title: album.title })}
-        />
-      </div>
+      {((moduleStatus[`${providerId}:new-albums`] === 'loading' && newAlbums.length === 0) || newAlbums.length > 0) && (
+        <div className="home-section" data-reveal data-reveal-order={7}>
+          {moduleStatus[`${providerId}:new-albums`] === 'loading' && newAlbums.length === 0 && <SkeletonCardGrid count={6} />}
+          <AlbumSection
+            title="新碟速递"
+            albums={newAlbums}
+            providerId={providerId}
+            onOpenAlbum={(album) => navigateToView('album', { providerId, albumId: album.id, title: album.title })}
+          />
+        </div>
+      )}
 
-      <div className="home-section" data-reveal data-reveal-order={8}>
-        {moduleStatus[`${providerId}:frequent-albums`] === 'loading' && frequentAlbums.length === 0 && <SkeletonCardGrid count={4} />}
-        <AlbumSection
-          title="常听歌手新专辑"
-          albums={frequentAlbums}
-          providerId={providerId}
-          onOpenAlbum={(album) => navigateToView('album', { providerId, albumId: album.id, title: album.title })}
-        />
-      </div>
+      {((moduleStatus[`${providerId}:frequent-albums`] === 'loading' && frequentAlbums.length === 0) || frequentAlbums.length > 0) && (
+        <div className="home-section" data-reveal data-reveal-order={8}>
+          {moduleStatus[`${providerId}:frequent-albums`] === 'loading' && frequentAlbums.length === 0 && <SkeletonCardGrid count={4} />}
+          <AlbumSection
+            title="常听歌手新专辑"
+            albums={frequentAlbums}
+            providerId={providerId}
+            onOpenAlbum={(album) => navigateToView('album', { providerId, albumId: album.id, title: album.title })}
+          />
+        </div>
+      )}
 
       <SmartRadioSection
         providerId={providerId}
@@ -294,7 +383,6 @@ function HistoryDailySection() {
           <div
             key={date}
             className={`pill-item ${activeDate === date ? 'active' : ''}`}
-            style={activeDate === date ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
             onClick={() => loadSongs('netease', date)}
           >
             {formatDateLabel(date)}
@@ -381,7 +469,7 @@ function HotSearchesSection({ providerId, searches, status }: { providerId: Remo
           <div
             key={item.id}
             className={`hot-search-item ${index < 3 ? 'hot-search-top' : ''}`}
-            style={{ '--i': Math.min(index, 10) } as CSSProperties}
+            style={{ '--i': Math.min(index, 6) } as CSSProperties}
             onClick={() => navigateToView('search', { keyword: item.keyword })}
             title={item.keyword}
           >
@@ -462,7 +550,7 @@ function ChartPreviewSection({ providerId, charts }: { providerId: RemoteProvide
           <div
             key={chart.id}
             className="chart-preview-card"
-            style={{ '--i': Math.min(index, 10) } as CSSProperties}
+            style={{ '--i': Math.min(index, 6) } as CSSProperties}
             onClick={() => navigateToView('chart', { providerId, chartId: chart.id, title: chart.title })}
           >
             <div className="chart-preview-cover">
@@ -507,6 +595,7 @@ function RecommendedArtistsSection({ providerId, artists, status }: { providerId
     subtitle: artist.aliases?.join(' / ') ?? artist.sourceLabel ?? (artist.albumCount ? `${artist.albumCount} 张专辑` : ''),
     coverUrl: artist.imageUrl,
     coverTone: artist.coverTone,
+    round: true,
     onOpen: () => navigateToView('artist', { providerId, artistId: artist.id, title: artist.name }),
     onPlay: async () => {
       const detail = await loadArtist(providerId, artist.id);

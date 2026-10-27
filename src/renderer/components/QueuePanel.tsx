@@ -3,11 +3,11 @@ import { usePlayerStore } from '../state/playerStore';
 import { useUiStore } from '../state/uiStore';
 import { formatDuration } from '../utils/format';
 import { sourceLabel } from '../utils/providerDisplay';
-import { onImageReveal, imageRevealRef } from '../utils/imageReveal';
 import { toThumbnailUrl } from '../utils/remoteCover';
 import { useSongContextMenu } from '../hooks/useSongContextMenu';
 import { useFixedVirtualWindow } from '../hooks/useFixedVirtualWindow';
 import { PopoverMenu } from './PopoverMenu';
+import { CoverImage } from './CoverImage';
 import { CloseIcon, HeartIcon } from './icons';
 
 /** 固定行高：32px 内容 + 8px*2 padding + 4px 列表间距 */
@@ -60,10 +60,20 @@ function QueueSongItem({
       style={
         {
           ...(virtualOffset !== undefined ? { '--queued-item-y': `${virtualOffset}px` } : {}),
-          ...(entryIndex !== undefined ? { '--i': Math.min(entryIndex, 24) } : {})
+          ...(entryIndex !== undefined ? { '--i': Math.min(entryIndex, 6) } : {})
         } as React.CSSProperties
       }
       onClick={() => selectQueueItem(item.id)}
+      role="button"
+      tabIndex={0}
+      aria-label={`播放 ${song.title} - ${song.artist}`}
+      onKeyDown={(event) => {
+        // 队列行是 div：Enter/Space 需要自己接，否则键盘无法切歌
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          selectQueueItem(item.id);
+        }
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -71,22 +81,23 @@ function QueueSongItem({
       }}
       title={sourceLabel(item.source, song.providerId)}
     >
-      {song.coverUrl ? (
-        <img
-          className={`queue-song-cover${instantReveal ? ' no-reveal' : ''}`}
-          ref={imageRevealRef}
-          src={toThumbnailUrl(song.coverUrl)}
-          alt=""
-          loading="lazy"
-          onLoad={onImageReveal}
-          onError={onImageReveal}
-        />
-      ) : (
-        <div className="queue-song-cover" style={{ background: song.coverTone || 'var(--bg-card)' }} />
-      )}
+      <CoverImage
+        className={`queue-song-cover${instantReveal ? ' no-reveal' : ''}`}
+        src={song.coverUrl}
+        tone={song.coverTone}
+        size={88}
+        noReveal={instantReveal}
+        fallbackIconSize={16}
+      />
       <div className="queue-song-meta">
         <div className="queue-song-title">
-          {isCurrent && <span style={{ color: 'var(--accent-primary)', marginRight: 6 }}>♪</span>}
+          {isCurrent && (
+            <span className="playing-wave queue-item-wave" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+          )}
           {song.title}
         </div>
         <div className="queue-song-artist">
@@ -113,7 +124,7 @@ function QueueSongItem({
         </button>
       )}
       <button
-        style={{ color: 'var(--text-muted)', padding: 4 }}
+        className="queue-song-remove"
         title="移除"
         aria-label="移除该歌曲"
         onClick={(e) => {
@@ -227,18 +238,32 @@ export function QueuePanel() {
       <div className={`drawer-panel ${isQueueOpen ? 'open' : ''} ${isLyricsOpen ? 'over-lyrics' : ''}`} data-drawer-panel="queue">
         <div className="drawer-header">
           <h3 className="drawer-title">播放队列 ({queue.length})</h3>
-          {queue.length > 0 && (
-            <button className="section-action-btn" style={{ padding: '3px 8px', fontSize: 11 }} onClick={clearQueue}>
-              清空
+          <div className="drawer-header-actions">
+            {queue.length > 0 && (
+              <button className="section-action-btn drawer-action-btn" onClick={clearQueue}>
+                清空
+              </button>
+            )}
+            <button
+              className="drawer-close-btn"
+              type="button"
+              aria-label="关闭播放队列"
+              title="关闭"
+              onClick={() => setQueueOpen(false)}
+            >
+              <CloseIcon size={14} strokeWidth={2.2} />
             </button>
-          )}
+          </div>
         </div>
+
+        {/* 列表首项就是当前歌曲（带波形与高亮），不再额外渲染一张
+            "正在播放"卡：同一首歌重复两遍，既占高度又让人误以为队列有两条。 */}
         <div
           className={`queue-song-list ${virtualized ? 'queued-list-virtual' : ''} ${entryAnimActive ? 'queued-entry-anim' : ''}`}
           ref={scrollHostRef}
         >
           {queue.length === 0 && (
-            <div style={{ padding: 24, textAlign: 'center', fontSize: 12.5, color: 'var(--text-tertiary)' }}>
+            <div className="drawer-status">
               队列为空，播放歌曲后会自动加入
             </div>
           )}

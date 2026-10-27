@@ -65,4 +65,16 @@ bun.lock
 server.lock.json
 sessionSnapshots/
 
+# Local AI-tooling state
 .commandcode/
+.freebuff/
+
+# Verification screenshots (local artifacts; kept on disk, not versioned)
+# 截图是每次改动后的本地验证产物，单个会话可累积数十 MB。
+# 进版本库会让仓库永久膨胀且无法瘦身，因此只保留目录占位。
+screenshots/*
+!screenshots/.gitkeep
+
+# Debug scratch (API dumps, session logs, ad-hoc preview pages)
+*.session.md
+*.api-dump.json

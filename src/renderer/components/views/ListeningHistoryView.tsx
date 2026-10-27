@@ -19,20 +19,35 @@ export function ListeningHistoryView() {
   }, [entries, currentSongId]);
 
   const songs = sorted.map((entry) => entry.song);
+  const totalMinutes = Math.round(entries.reduce((sum, entry) => sum + (entry.song.durationMs ?? 0), 0) / 60000);
 
   return (
     <div data-reveal data-reveal-order={0}>
-      <div className="section-header" style={{ marginBottom: 24 }}>
-        <div className="section-title-group">
-          <h1 className="detail-title" style={{ fontSize: 22 }}>最近播放记录</h1>
-          <span className="section-sub-title">
-            共收听 {entries.length} 首歌曲{entries[0] ? ` · 最近更新 ${formatRelativeTime(entries[0].lastPlayedAt)}` : ''}
+      <div className="history-header">
+        <div className="page-header-main">
+          <span className="page-kicker">我的音乐</span>
+          <h1 className="detail-title">最近播放</h1>
+          <span className="page-subtitle">
+            共 {entries.length} 首歌曲{entries[0] ? ` · 最近更新 ${formatRelativeTime(entries[0].lastPlayedAt)}` : ''}
           </span>
         </div>
         {entries.length > 0 && (
-          <button className="section-action-btn" onClick={clear}>清空历史</button>
+          <button className="section-action-btn history-clear-btn" onClick={clear}>清空历史</button>
         )}
       </div>
+
+      {entries.length > 0 && (
+        <div className="history-stats">
+          <div className="history-stat-card">
+            <span className="history-stat-value">{entries.length}</span>
+            <span className="history-stat-label">累计收听曲目</span>
+          </div>
+          <div className="history-stat-card">
+            <span className="history-stat-value">{totalMinutes}</span>
+            <span className="history-stat-label">累计时长（分钟）</span>
+          </div>
+        </div>
+      )}
 
       {entries.length === 0 ? (
         <EmptyState title="暂无播放记录" desc="播放歌曲超过 30 秒后会自动记录在这里" />

@@ -6,8 +6,8 @@ import { useUiStore } from '../state/uiStore';
 import { useSongContextMenu } from '../hooks/useSongContextMenu';
 import { formatDuration } from '../utils/format';
 import { PopoverMenu } from './PopoverMenu';
-import { HeartIcon, MoreIcon } from './icons';
-import { onImageReveal, imageRevealRef } from '../utils/imageReveal';
+import { CoverImage } from './CoverImage';
+import { HeartIcon, MoreIcon, PlayIcon } from './icons';
 
 export type SongOrigin =
   | { kind: 'playlist'; providerId: ProviderId; playlistId: string; ownership?: Playlist['ownership'] }
@@ -285,7 +285,7 @@ function SongRow({
       className={`song-row ${isPlaying ? 'playing' : ''} ${showAlbum ? '' : 'song-row-without-album'}`}
       data-song-provider={song.providerId}
       data-song-id={song.id}
-      style={{ '--i': Math.min(index, 12) } as CSSProperties}
+      style={{ '--i': Math.min(index, 6) } as CSSProperties}
       onClick={onClick}
       onContextMenu={openContextMenu}
     >
@@ -297,18 +297,25 @@ function SongRow({
             <span />
           </div>
         ) : (
-          String(index + 1).padStart(2, '0')
+          <>
+            <span className="song-index-number">{String(index + 1).padStart(2, '0')}</span>
+            <span className="song-index-play" aria-hidden="true">
+              <PlayIcon size={15} strokeWidth={0} filled />
+            </span>
+          </>
         )}
       </div>
       <div className="song-title-col">
-        {song.coverUrl ? (
-          <img className="song-row-cover" ref={imageRevealRef} src={song.coverUrl} alt="" loading="lazy" onLoad={onImageReveal} onError={onImageReveal} />
-        ) : (
-          <div className="song-row-cover" style={{ background: song.coverTone || 'var(--bg-card)' }} />
-        )}
+        <CoverImage
+          className="song-row-cover"
+          src={song.coverUrl}
+          tone={song.coverTone}
+          size={96}
+          fallbackIconSize={16}
+        />
         <div className="song-row-meta">
           <span className="song-row-title">{song.title}</span>
-          <span className="song-row-artist">{renderArtistLinks()}</span>
+          <span className="song-row-artist song-row-artist-inline">{renderArtistLinks()}</span>
         </div>
       </div>
       <div className="song-artist-col">{renderArtistLinks()}</div>

@@ -10,9 +10,9 @@ import { usePlayerStore } from '../../state/playerStore';
 import { SongTable, type SongOrigin } from '../../components/SongTable';
 import { MediaCardGrid, type MediaCardData, EmptyState } from '../../components/MediaCards';
 import { SkeletonBlock, SkeletonPills, SkeletonSongRow } from '../../components/Skeleton';
+import { CoverImage } from '../../components/CoverImage';
 import { PlayIcon } from '../../components/icons';
 import { useUiStore } from '../../state/uiStore';
-import { onImageReveal, imageRevealRef } from '../../utils/imageReveal';
 
 export type DetailKind = 'playlist' | 'chart' | 'artist' | 'album' | 'recommendation';
 
@@ -140,6 +140,7 @@ function PlaylistDetail({ providerId, playlistId, title }: { providerId: RemoteP
         <DetailHero
           coverUrl={detail.playlist.coverUrl}
           coverTone={detail.playlist.coverTone}
+          kicker={ownership === 'liked' || detail.playlist.isLiked ? '我喜欢的歌单' : '歌单'}
           title={titleText}
           desc={detail.playlist.description}
           stats={[
@@ -148,6 +149,7 @@ function PlaylistDetail({ providerId, playlistId, title }: { providerId: RemoteP
             ...(detail.playCount != null ? [`播放 ${detail.playCount} 次`] : [])
           ]}
           onPlayAll={tracks.length > 0 ? () => playSongsFromList(tracks, 0) : undefined}
+          queueAllSongs={tracks}
         />
       ) : (
         <DetailHeroSkeleton />
@@ -184,10 +186,12 @@ function ChartDetail({ providerId, chartId }: { providerId: RemoteProviderId; ch
         <DetailHero
           coverUrl={chart.coverUrl}
           coverTone={chart.coverTone}
+          kicker="榜单"
           title={chart.title}
           desc={chart.description}
           stats={chart.updateLabel ? [`${chart.updateLabel}`] : []}
           onPlayAll={tracks && tracks.length > 0 ? () => playSongsFromList(tracks, 0) : undefined}
+          queueAllSongs={tracks ?? undefined}
         />
       ) : (
         <DetailHeroSkeleton />
@@ -287,24 +291,26 @@ function ArtistDetail({ providerId, artistId }: { providerId: RemoteProviderId; 
         round
         coverUrl={detail.imageUrl}
         coverTone={detail.coverTone}
+        kicker="歌手"
         title={detail.name}
         desc={detail.description}
         subtitle={metaLine}
         onPlayAll={loadedSongs.length > 0 ? () => playSongsFromList(loadedSongs, 0) : undefined}
         playAllLabel="播放全部歌曲"
+        queueAllSongs={loadedSongs}
       />
 
-      <div className="filter-pills-bar" style={{ marginTop: 24 }}>
+      {/* 用专用类而不是内联 marginTop：.filter-pills-bar 自带 -6px 上边距与
+          -4px 左右负边距，内联覆盖后会与表格边缘错开 4px */}
+      <div className="filter-pills-bar artist-detail-tabs">
         <div
           className={`pill-item ${activeTab === 'songs' ? 'active' : ''}`}
-          style={activeTab === 'songs' ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
           onClick={() => setActiveTab('songs')}
         >
           热门单曲{detail.songCount != null ? ` (${detail.songCount})` : ''}
         </div>
         <div
           className={`pill-item ${activeTab === 'albums' ? 'active' : ''}`}
-          style={activeTab === 'albums' ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
           onClick={() => setActiveTab('albums')}
         >
           所有专辑
@@ -318,7 +324,7 @@ function ArtistDetail({ providerId, artistId }: { providerId: RemoteProviderId; 
             {loadingMore && <SkeletonSongRow rows={4} />}
             <div ref={loadMoreRef} style={{ height: 1 }} aria-hidden="true" />
             {!hasMore && loadedSongs.length > 0 && (
-              <div style={{ textAlign: 'center', padding: '16px 0', fontSize: 12, color: 'var(--text-muted)' }}>
+              <div className="list-end-note">
                 已加载全部 {loadedSongs.length} 首单曲
               </div>
             )}
@@ -350,15 +356,18 @@ function AlbumDetail({ providerId, albumId }: { providerId: RemoteProviderId; al
       <DetailHero
         coverUrl={album.coverUrl}
         coverTone={album.coverTone}
+        kicker="专辑"
         title={album.title}
         desc={album.description || `${album.artistName} 的音乐专辑`}
+        subtitle={album.artistName}
         stats={[
           album.releaseDate?.slice(0, 4) ? `发行于 ${album.releaseDate.slice(0, 4)}` : null,
           `${album.trackCount ?? album.tracks.length} 首歌曲`
         ].filter(Boolean) as string[]}
         onPlayAll={album.tracks.length > 0 ? () => playSongsFromList(album.tracks, 0) : undefined}
+        queueAllSongs={album.tracks}
       />
-      <SongTable songs={album.tracks} origin={{ kind: 'album', providerId }} onPlay={(song) => playSongsFromList(album.tracks, album.tracks.findIndex((s) => s.id === song.id && s.providerId === song.providerId))} />
+      <SongTable songs={album.tracks} showAlbum={false} origin={{ kind: 'album', providerId }} onPlay={(song) => playSongsFromList(album.tracks, album.tracks.findIndex((s) => s.id === song.id && s.providerId === song.providerId))} />
     </div>
   );
 }
@@ -457,10 +466,12 @@ function RecommendationCollectionDetail({ providerId, collectionId, title }: { p
         <DetailHeroSkeleton />
       ) : (
         <DetailHero
+          kicker="推荐"
           title={heroTitle}
           desc="根据您的收听习惯智能生成的精选推荐"
           stats={songs && songs.length > 0 ? [`${songs.length} 首歌曲`] : []}
           onPlayAll={songs && songs.length > 0 ? () => playSongsFromList(songs, 0) : undefined}
+          queueAllSongs={songs ?? undefined}
         />
       )}
       {status === 'loading' && <SkeletonSongRow rows={8} />}
@@ -472,11 +483,11 @@ function RecommendationCollectionDetail({ providerId, collectionId, title }: { p
   );
 }
 
-function ClampedText({ text, lineClamp = 3 }: { text?: string; lineClamp?: number }) {
+function ClampedText({ text, lineClamp = 2 }: { text?: string; lineClamp?: number }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
-  const collapsedHeight = lineClamp * 19.4 + 2;
+  const collapsedHeight = lineClamp * 22.4 + 2;
   const [fullHeight, setFullHeight] = useState<number | null>(null);
   // 收起时延迟恢复 WebkitLineClamp，让 max-height 过渡先走完
   const [clampEnabled, setClampEnabled] = useState(true);
@@ -521,10 +532,9 @@ function ClampedText({ text, lineClamp = 3 }: { text?: string; lineClamp?: numbe
     <>
       <p
         ref={ref}
-        className="detail-hero-desc"
+        className="hero-desc"
         onTransitionEnd={handleTransitionEnd}
         style={{
-          maxWidth: 720,
           maxHeight: expanded ? (fullHeight ?? 320) : collapsedHeight,
           WebkitLineClamp: clampEnabled && !expanded ? lineClamp : 'none'
         }}
@@ -533,11 +543,11 @@ function ClampedText({ text, lineClamp = 3 }: { text?: string; lineClamp?: numbe
       </p>
       {overflowing && (
         <button
-          className="detail-hero-desc-toggle"
+          className="hero-desc-toggle"
           onClick={handleToggle}
           aria-expanded={expanded}
         >
-          {expanded ? '收起' : '展开'}
+          {expanded ? '收起' : '展开简介'}
         </button>
       )}
     </>
@@ -548,74 +558,101 @@ function DetailHero({
   coverUrl,
   coverTone,
   round = false,
-  scrimImage,
+  kicker,
   title,
   subtitle,
   desc,
   stats,
   onPlayAll,
-  playAllLabel = '播放全部'
+  playAllLabel = '播放全部',
+  queueAllSongs
 }: {
   coverUrl?: string;
   coverTone?: string;
   round?: boolean;
-  scrimImage?: string;
+  kicker?: string;
   title: string;
   subtitle?: string;
   desc?: string;
   stats?: string[];
   onPlayAll?: () => void;
   playAllLabel?: string;
+  queueAllSongs?: Song[];
 }) {
   const [coverBroken, setCoverBroken] = useState(false);
+  const enqueueSong = usePlayerStore((s) => s.enqueueSong);
+
   useEffect(() => {
     setCoverBroken(false);
   }, [coverUrl]);
 
+  const showArt = Boolean(coverUrl) && !coverBroken;
+  const canQueue = Boolean(queueAllSongs && queueAllSongs.length > 0);
+
   return (
-    <section className="detail-hero">
-      {coverUrl && !coverBroken && (
-        <div className="detail-hero-media">
-          <img
-            className={`detail-hero-cover ${round ? 'round' : ''}`}
-            ref={imageRevealRef}
-            src={coverUrl}
-            alt={title}
-            loading="eager"
-            decoding="async"
-            onLoad={onImageReveal}
-            onError={(e) => {
-              setCoverBroken(true);
-              onImageReveal(e);
-            }}
-          />
-        </div>
-      )}
-      <div className="detail-hero-info">
-        <div className="detail-hero-info-top">
-          <h1 className="detail-hero-title">{title}</h1>
-          {subtitle && <p className="detail-hero-subtitle">{subtitle}</p>}
-        </div>
-        <div className="detail-hero-info-middle">
-          <ClampedText text={desc} />
-        </div>
-        <div className="detail-hero-info-bottom">
-          {stats && stats.length > 0 && (
-            <div className="detail-hero-stats">
-              {stats.map((s) => (
-                <span key={s} className="stat-badge">{s}</span>
-              ))}
-            </div>
-          )}
-          {onPlayAll && (
-            <div className="detail-hero-actions">
-              <button className="btn-primary-play" onClick={onPlayAll}>
-                <PlayIcon size={16} strokeWidth={2} filled />
+    <section
+      className="hero-billboard"
+      data-tone-only={showArt ? undefined : 'true'}
+      style={
+        {
+          '--hero-art': showArt ? `url("${(coverUrl ?? '').replace(/"/g, '%22')}")` : 'none',
+          '--hero-tone': coverTone || 'var(--accent-gradient)'
+        } as React.CSSProperties
+      }
+    >
+      <div className="hero-backdrop" aria-hidden="true" />
+      <div className="hero-scrim" aria-hidden="true" />
+
+      <div className={`hero-cover${round ? ' hero-cover--round' : ''}`}>
+        <CoverImage
+          className="hero-cover-img"
+          src={coverUrl}
+          tone={coverTone}
+          alt={title}
+          size={560}
+          fallbackIconSize={44}
+        />
+        {onPlayAll && (
+          <button className="hero-play-fab" type="button" title={playAllLabel} aria-label={playAllLabel} onClick={onPlayAll}>
+            <PlayIcon size={20} strokeWidth={0} filled />
+          </button>
+        )}
+      </div>
+
+      <div className="hero-copy">
+        {kicker && <span className="hero-kicker">{kicker}</span>}
+        <h1 className="hero-title">{title}</h1>
+        {subtitle && <p className="hero-meta">{subtitle}</p>}
+        <ClampedText text={desc} />
+        {stats && stats.length > 0 && (
+          <div className="hero-chips">
+            {stats.map((s) => (
+              <span key={s} className="stat-chip">{s}</span>
+            ))}
+          </div>
+        )}
+        {(onPlayAll || canQueue) && (
+          <div className="hero-actions">
+            {onPlayAll && (
+              <button className="btn-primary" onClick={onPlayAll}>
+                <PlayIcon size={17} strokeWidth={0} filled />
                 {playAllLabel}
               </button>
-            </div>
-          )}
-        </div>
+            )}
+            {canQueue && (
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  for (const song of queueAllSongs ?? []) {
+                    enqueueSong(song, 'recommendation');
+                  }
+                }}
+              >
+                加入播放队列
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

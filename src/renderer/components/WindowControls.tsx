@@ -16,13 +16,13 @@ export function WindowControls() {
   return (
     <div className="window-controls" role="group" aria-label="窗口控制">
       <button className="window-control-btn" title="最小化" aria-label="最小化" onClick={handleMinimize}>
-        <MinimizeIcon size={13} strokeWidth={2} />
+        <MinimizeIcon size={14} strokeWidth={2} />
       </button>
       <button className="window-control-btn" title="最大化 / 还原" aria-label="最大化 / 还原" onClick={handleMaximize}>
-        <MaximizeIcon size={12} strokeWidth={2} />
+        <MaximizeIcon size={13} strokeWidth={2} />
       </button>
       <button className="window-control-btn window-control-close" title="关闭" aria-label="关闭" onClick={handleClose}>
-        <CloseWindowIcon size={13} strokeWidth={2} />
+        <CloseWindowIcon size={14} strokeWidth={2} />
       </button>
     </div>
   );

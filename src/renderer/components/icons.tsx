@@ -2,19 +2,25 @@ import type { LucideIcon } from 'lucide-react';
 import {
   AlertTriangle,
   BarChart3,
+  Captions,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CircleUserRound,
   Compass,
   Copy,
+  Crown,
+  Dna,
   Heart,
   History,
   Info,
   LayoutGrid,
   ListMusic,
   ListPlus,
+  Lock,
+  LogIn,
   Maximize2,
   Menu,
   Minus,
@@ -30,6 +36,7 @@ import {
   Repeat,
   Repeat1,
   RotateCcw,
+  ScanLine,
   Search,
   Shuffle,
   SkipBack,
@@ -73,6 +80,7 @@ export const NavDiscoverIcon = makeIcon(Compass);
 export const NavChartsIcon = makeIcon(BarChart3);
 export const NavPlaylistIcon = makeIcon(LayoutGrid);
 export const NavHistoryIcon = makeIcon(History);
+export const NavDnaIcon = makeIcon(Dna);
 
 export const ModeSequenceIcon = makeIcon(ListMusic);
 export const ModeShuffleIcon = makeIcon(Shuffle);
@@ -125,3 +133,10 @@ export const ResetIcon = makeIcon(RotateCcw);
 export const AddToListIcon = makeIcon(ListPlus);
 export const RemoveIcon = makeIcon(Trash2);
 export const PlusIcon = makeIcon(Plus);
+export const LockIcon = makeIcon(Lock);
+export const UserIcon = makeIcon(CircleUserRound);
+export const CrownIcon = makeIcon(Crown);
+export const VolumeUpIcon = makeIcon(Volume2);
+export const LoginIcon = makeIcon(LogIn);
+export const ScanIcon = makeIcon(ScanLine);
+export const LyricsIcon = makeIcon(Captions);

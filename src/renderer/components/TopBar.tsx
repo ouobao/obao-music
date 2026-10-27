@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';import { useUiStore } from '../state/uiStore';
+import { useEffect, useRef, useState } from 'react';
+import { useUiStore } from '../state/uiStore';
 import { useProviderSessionStore } from '../state/providerSessionStore';
 import { useSearchHistoryStore } from '../state/searchHistoryStore';
 import type { RemoteProviderId } from '../../shared/musicTypes';
 import type { LoginStatus } from '../../shared/providerTypes';
 import { setTheme } from '../hooks/useTheme';
 import { onImageReveal, imageRevealRef } from '../utils/imageReveal';
-import { BackIcon, ForwardIcon, SearchIcon, ThemeDarkIcon, ThemeLightIcon } from './icons';
+import { BackIcon, ForwardIcon, SearchIcon, LoginIcon, ThemeDarkIcon, ThemeLightIcon } from './icons';
 import { ProviderSegmentedControl } from './ProviderSegmentedControl';
 import { WindowControls } from './WindowControls';
 
@@ -84,6 +85,9 @@ export function TopBar({ onSearch, onOpenLogin }: TopBarProps) {
     recordSearch(trimmed);
     setDropdownOpen(false);
     setKeyword(trimmed);
+    // 提交后主动失焦：否则白色 focus ring 会跟着用户进入结果页/详情页，
+    // 让页面看起来一直处于"正在输入"状态。
+    inputRef.current?.blur();
     onSearch(trimmed);
   };
 
@@ -92,16 +96,16 @@ export function TopBar({ onSearch, onOpenLogin }: TopBarProps) {
       <div className="topbar-left">
         <div className="nav-history-controls">
           <button className="history-btn" title="后退" disabled={!canGoBack} onClick={goBack}>
-            <BackIcon size={14} strokeWidth={2} />
+            <BackIcon size={16} strokeWidth={2.1} />
           </button>
           <button className="history-btn" title="前进" disabled={!canGoForward} onClick={goForward}>
-            <ForwardIcon size={14} strokeWidth={2} />
+            <ForwardIcon size={16} strokeWidth={2.1} />
           </button>
         </div>
 
         <div className="search-capsule">
           <div className="search-input-wrapper">
-            <SearchIcon size={13} strokeWidth={2} />
+            <SearchIcon size={15} strokeWidth={2.1} />
             <input
               ref={inputRef}
               type="text"
@@ -147,7 +151,7 @@ export function TopBar({ onSearch, onOpenLogin }: TopBarProps) {
                   <div className="dropdown-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>搜索历史</span>
                     <button
-                      style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}
+                      className="dropdown-clear-btn"
                       onClick={clearSearchHistory}
                     >
                       清空
@@ -180,7 +184,9 @@ export function TopBar({ onSearch, onOpenLogin }: TopBarProps) {
 
         <ThemeToggle />
 
-        <UserBadge status={statuses[activeProviderId]} onClick={onOpenLogin} />
+        {/* 注意：不能直接 onClick={onOpenLogin}——React 会把点击事件对象当作
+            providerId 传给登录弹窗，导致 IPC 反序列化失败（二维码创建报错） */}
+        <UserBadge status={statuses[activeProviderId]} onClick={() => onOpenLogin()} />
 
         <WindowControls />
       </div>
@@ -218,28 +224,31 @@ function ThemeToggle() {
         setTheme(next ? 'light' : 'dark');
       }}
     >
-      {isLight ? <ThemeDarkIcon size={15} strokeWidth={2} /> : <ThemeLightIcon size={15} strokeWidth={2} />}
+      {isLight ? <ThemeDarkIcon size={17} strokeWidth={2.1} /> : <ThemeLightIcon size={17} strokeWidth={2.1} />}
     </button>
   );
 }
 
 function UserBadge({ status, onClick }: { status?: LoginStatus; onClick: () => void }) {
   const nickname = status?.nickname;
+  const isGuest = !nickname;
   return (
     <button
-      className="user-profile-badge"
+      className={`user-profile-badge${isGuest ? ' is-guest' : ''}`}
       onClick={onClick}
       title={nickname ? `已登录：${nickname}` : '登录音乐平台'}
       aria-label={nickname ? `用户：${nickname}` : '登录音乐平台'}
     >
       {status?.avatarUrl ? (
         <img className="user-avatar" ref={imageRevealRef} src={status.avatarUrl} alt="" onLoad={onImageReveal} onError={onImageReveal} />
-      ) : (
-        <div
-          className="user-avatar user-avatar-placeholder"
-        >
-          {nickname ? nickname.slice(0, 1).toUpperCase() : '登'}
+      ) : nickname ? (
+        <div className="user-avatar user-avatar-placeholder">
+          {nickname.slice(0, 1).toUpperCase()}
         </div>
+      ) : (
+        <span className="user-guest-icon" aria-hidden="true">
+          <LoginIcon size={16} strokeWidth={1.9} />
+        </span>
       )}
       <span className="user-name">{nickname ?? '登录'}</span>
     </button>

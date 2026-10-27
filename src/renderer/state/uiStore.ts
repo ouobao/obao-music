@@ -10,7 +10,8 @@ export type ViewName =
   | 'artist'
   | 'album'
   | 'recommendationCollection'
-  | 'listeningHistory';
+  | 'listeningHistory'
+  | 'musicDna';
 
 export interface ViewParams {
   providerId?: string;

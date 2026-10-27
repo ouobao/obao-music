@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { formatPlayCount } from '../utils/format';
 import { ChevronRightIcon, MusicIcon, PlayBadgeIcon } from './icons';
-import { onImageReveal, imageRevealRef } from '../utils/imageReveal';
+import { CoverImage } from './CoverImage';
 
 export interface MediaCardData {
   id: string;
@@ -12,6 +12,8 @@ export interface MediaCardData {
   coverTone?: string;
   playCount?: number;
   badge?: string;
+  /** 圆形封面（歌手头像） */
+  round?: boolean;
   onOpen: () => void;
   onPlay?: () => void;
 }
@@ -60,30 +62,50 @@ export function MediaCardGrid({ cards, columns }: { cards: MediaCardData[]; colu
 
 export function MediaCard({ card, index = 0 }: { card: MediaCardData; index?: number }) {
   return (
-    <div className="media-card" style={{ '--i': Math.min(index, 10) } as CSSProperties} onClick={card.onOpen}>
-      <div className="media-cover-container">
-        {card.coverUrl ? (
-          <img className="media-cover-img" ref={imageRevealRef} src={card.coverUrl} alt={card.title} loading="lazy" onLoad={onImageReveal} onError={onImageReveal} />
-        ) : (
-          <div className="media-cover-img" style={{ background: card.coverTone || 'var(--bg-card)' }} />
-        )}
+    <div
+      className="media-card"
+      style={{ '--i': Math.min(index, 6) } as CSSProperties}
+      role="button"
+      tabIndex={0}
+      aria-label={card.subtitle ? `${card.title} · ${card.subtitle}` : card.title}
+      onClick={card.onOpen}
+      onKeyDown={(e) => {
+        // 卡片是 div：必须自己处理 Enter/Space，否则整片网格键盘不可达
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          card.onOpen();
+        }
+      }}
+    >
+      <div className={`media-cover-container${card.round ? ' media-cover--round' : ''}`}>
+        <CoverImage
+          className="media-cover-img"
+          src={card.coverUrl}
+          tone={card.coverTone}
+          alt={card.title}
+          size={400}
+          fallbackIconSize={34}
+        />
         {card.playCount != null && card.playCount > 0 && (
           <div className="media-play-count">
             <PlayBadgeIcon size={11} strokeWidth={2} filled />
             {formatPlayCount(card.playCount)}
           </div>
         )}
-        {card.badge && <span className="banner-tag" style={{ top: '8px', right: '8px' }}>{card.badge}</span>}
+        {card.badge && <span className="media-badge">{card.badge}</span>}
         {card.onPlay && (
-          <div
+          <button
+            type="button"
             className="media-play-badge"
+            title="播放"
+            aria-label={`播放 ${card.title}`}
             onClick={(e) => {
               e.stopPropagation();
               card.onPlay?.();
             }}
           >
-            <PlayBadgeIcon size={16} strokeWidth={2} filled />
-          </div>
+            <PlayBadgeIcon size={17} strokeWidth={2} filled />
+          </button>
         )}
       </div>
       <div className="media-title">{card.title}</div>
@@ -118,7 +140,7 @@ export function EmptyState({ title, desc, actionLabel, onAction }: { title: stri
       <div className="empty-state-title">{title}</div>
       {desc && <div className="empty-state-desc">{desc}</div>}
       {actionLabel && (
-        <button className="btn-secondary-action" onClick={onAction}>
+        <button className="btn-secondary" onClick={onAction}>
           {actionLabel}
         </button>
       )}

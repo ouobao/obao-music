@@ -33,6 +33,10 @@ const APP_NAME = '欧包音乐';
 const APP_ID = 'com.obao.music';
 const DEV_RESTART_EXIT_CODE = 75;
 const isDev = !app.isPackaged && Boolean(process.env.VITE_DEV_SERVER_URL);
+// 开发期启用 CDP 调试端口（scripts/cdp-eval.cjs 依赖）：仅 dev 生效，打包版本不受影响
+if (isDev) {
+  app.commandLine.appendSwitch('remote-debugging-port', '9223');
+}
 const audioSourceRegistry = createAudioSourceRegistry();
 const fullscreenTransitions = createFullscreenTransitionController();
 let mainWindow: electron.BrowserWindow | null = null;

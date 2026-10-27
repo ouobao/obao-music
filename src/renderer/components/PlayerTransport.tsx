@@ -5,6 +5,7 @@ import type { PlaybackMode } from '../state/playerTypes';
 import { formatDuration, clamp } from '../utils/format';
 import { PopoverMenu } from './PopoverMenu';
 import {
+  LyricsIcon,
   ModeListLoopIcon,
   ModeSequenceIcon,
   ModeShuffleIcon,
@@ -21,10 +22,10 @@ import {
 } from './icons';
 
 const MODE_ICONS: Record<PlaybackMode, React.ReactElement> = {
-  sequence: <ModeSequenceIcon size={15} strokeWidth={2} />,
-  shuffle: <ModeShuffleIcon size={15} strokeWidth={2} />,
-  singleLoop: <ModeSingleLoopIcon size={15} strokeWidth={2} />,
-  listLoop: <ModeListLoopIcon size={15} strokeWidth={2} />
+  sequence: <ModeSequenceIcon size={17} strokeWidth={2.1} />,
+  shuffle: <ModeShuffleIcon size={17} strokeWidth={2.1} />,
+  singleLoop: <ModeSingleLoopIcon size={17} strokeWidth={2.1} />,
+  listLoop: <ModeListLoopIcon size={17} strokeWidth={2.1} />
 };
 
 const MODE_LABELS: Record<PlaybackMode, string> = {
@@ -64,11 +65,10 @@ export function PlaybackCoreControls() {
     usePlayerStore.getState().volume > 0 ? usePlayerStore.getState().volume : 58
   );
 
-  const logicIndex = volume === 0 ? 0 : volume <= 50 ? 1 : 2;
   const volumeIcon =
-    logicIndex === 0 ? <VolumeMutedIcon size={15} strokeWidth={2} /> :
-    logicIndex === 1 ? <VolumeLowIcon size={15} strokeWidth={2} /> :
-    <VolumeHighIcon size={15} strokeWidth={2} />;
+    volume === 0 ? <VolumeMutedIcon size={17} strokeWidth={2.1} /> :
+    volume <= 50 ? <VolumeLowIcon size={17} strokeWidth={2.1} /> :
+    <VolumeHighIcon size={17} strokeWidth={2.1} />;
 
   const toggleMute = () => {
     if (volume === 0) {
@@ -120,16 +120,17 @@ export function PlaybackCoreControls() {
         />
 
         <button className="control-btn" title="上一首" onClick={playPrevious}>
-          <SkipBackIcon size={16} strokeWidth={2} filled />
+          <SkipBackIcon size={18} strokeWidth={0} filled />
         </button>
         <button className="control-btn play-primary" title="播放 / 暂停" onClick={togglePlaying}>
-          {isPlaying ? <PauseIcon size={16} strokeWidth={2} filled /> : <PlayIcon size={16} strokeWidth={2} filled />}
+          {isPlaying ? <PauseIcon size={19} strokeWidth={0} filled /> : <PlayIcon size={19} strokeWidth={0} filled />}
         </button>
         <button className="control-btn" title="下一首" onClick={playNext}>
-          <SkipForwardIcon size={16} strokeWidth={2} filled />
+          <SkipForwardIcon size={18} strokeWidth={0} filled />
         </button>
 
-        {/* 音量调节：按钮式弹出面板（与左侧播放顺序、右侧音质的交互逻辑一致） */}
+        {/* 音量保持在中间控制组，与左侧模式/上一首、右侧下一首形成
+            对称的 2+2 布局，播放键才会落在窗口正中；右侧功能区保留歌词/音质/队列。 */}
         <button
           ref={volumeTriggerRef}
           className="control-btn"
@@ -187,7 +188,6 @@ export function PlaybackCoreControls() {
           aria-valuemax={Math.round(playbackDurationMs)}
           aria-valuenow={Math.round(playbackPositionMs)}
           aria-valuetext={`${formatDuration(playbackPositionMs)} / ${formatDuration(playbackDurationMs)}`}
-          style={{ height: 5 }}
           onPointerDown={(e) => {
             e.preventDefault();
             setProgressDragging(true);
@@ -211,7 +211,17 @@ export function PlaybackCoreControls() {
   );
 }
 
-export function PlaybackExtras({ onOpenSimilar, onQueue, hideSimilar = false }: { onOpenSimilar: () => void; onQueue?: () => void; hideSimilar?: boolean }) {
+export function PlaybackExtras({
+  onOpenSimilar,
+  onOpenLyrics,
+  onQueue,
+  hideSimilar = false
+}: {
+  onOpenSimilar: () => void;
+  onOpenLyrics?: () => void;
+  onQueue?: () => void;
+  hideSimilar?: boolean;
+}) {
   const currentSong = usePlayerStore((s) => s.currentSong);
   const playbackQuality = usePlayerStore((s) => s.playbackQuality);
   const setPlaybackQuality = usePlayerStore((s) => s.setPlaybackQuality);
@@ -239,9 +249,15 @@ export function PlaybackExtras({ onOpenSimilar, onQueue, hideSimilar = false }: 
 
   return (
     <>
+      {onOpenLyrics && (
+        <button className="control-btn" title="歌词" aria-label="打开歌词页" onClick={onOpenLyrics}>
+          <LyricsIcon size={18} strokeWidth={1.9} />
+        </button>
+      )}
+
       {showSimilar && !hideSimilar && (
-        <button className="control-btn" title="相似歌曲推荐" aria-label="相似歌曲推荐" onClick={onOpenSimilar}>
-          <SimilarIcon size={16} strokeWidth={2} />
+        <button className="control-btn playerbar-similar-btn" title="相似歌曲推荐" aria-label="相似歌曲推荐" onClick={onOpenSimilar}>
+          <SimilarIcon size={17} strokeWidth={2.1} />
         </button>
       )}
 
@@ -249,6 +265,7 @@ export function PlaybackExtras({ onOpenSimilar, onQueue, hideSimilar = false }: 
         ref={qualityTriggerRef}
         className="quality-badge-btn"
         title="播放音质"
+        aria-label="播放音质"
         aria-haspopup="menu"
         aria-expanded={qualityMenuOpen}
         onClick={() => setQualityMenuOpen((open) => !open)}
@@ -266,7 +283,7 @@ export function PlaybackExtras({ onOpenSimilar, onQueue, hideSimilar = false }: 
       />
 
       <button className="control-btn" title="播放队列" aria-label="播放队列" onClick={handleQueue}>
-        <QueueIcon size={17} strokeWidth={2} />
+        <QueueIcon size={19} strokeWidth={2.1} />
       </button>
     </>
   );

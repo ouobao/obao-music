@@ -7,6 +7,8 @@ import { useNotificationStore } from '../state/notificationStore';
 import { useLibraryStore } from '../state/libraryStore';
 import { ProviderSegmentedControl } from './ProviderSegmentedControl';
 import { providerLabel } from '../utils/providerDisplay';
+import { CheckIcon, CloseIcon, MusicNoteIcon, ResetIcon, ScanIcon } from './icons';
+import logoUrl from '../../../assets/branding/obao-mark.svg';
 
 interface LoginDialogProps {
   open: boolean;
@@ -95,19 +97,52 @@ export function LoginDialog({ open, preferredProviderId, onClose }: LoginDialogP
 
   useEffect(() => {
     if (open) {
-      setActiveTab(preferredProviderId ?? 'netease');
+      // 防御：preferredProviderId 运行时可能是非法值（历史调用点透传事件对象等），
+      // 非法值会让 QrLoginPanel 把事件对象当作 providerId 发给主进程
+      setActiveTab(preferredProviderId === 'qq' ? 'qq' : 'netease');
       hydrateStatuses();
     }
   }, [open, preferredProviderId, hydrateStatuses]);
 
+  // ESC 关闭弹窗
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
   const status = statuses[activeTab];
 
   return (
-    <div className={`modal-backdrop ${open ? 'open' : ''}`} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-card" style={{ width: 380 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h3 style={{ fontSize: 16, fontWeight: 'var(--font-weight-bold)' }}>登录欧包音乐</h3>
-          <button onClick={onClose} style={{ color: 'var(--text-tertiary)' }}>✕</button>
+    <div
+      className={`modal-backdrop ${open ? 'open' : ''}`}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="modal-card login-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`登录${providerLabel(activeTab)}`}
+      >
+        <div className="dialog-header">
+          <span className="dialog-icon dialog-icon--avatar" aria-hidden="true">
+            <img src={logoUrl} alt="" />
+          </span>
+          <div className="dialog-heading">
+            <div className="dialog-title">登录欧包音乐</div>
+            <div className="dialog-subtitle">
+              扫码同步收藏歌单、收听权限与播放记录
+            </div>
+          </div>
+          <button className="dialog-close-btn" onClick={onClose} aria-label="关闭登录弹窗">
+            <CloseIcon size={15} strokeWidth={2.2} />
+          </button>
         </div>
 
         <ProviderSegmentedControl<RemoteProviderId>
@@ -189,8 +224,16 @@ function LoginTabTransition({ tab, children }: { tab: string; children: ReactNod
   );
 }
 
+const QR_STATE_HINT: Record<string, string> = {
+  creating: '正在生成二维码…',
+  waiting: '打开手机 App 扫一扫',
+  scanned: '已扫码，请在手机上确认',
+  success: '登录成功',
+  expired: '二维码已过期',
+  failed: '二维码加载失败'
+};
+
 function QrLoginPanel({ providerId, active, onLoggedIn, onFallbackLogin }: { providerId: RemoteProviderId; active: boolean; onLoggedIn: () => void; onFallbackLogin: () => void }) {
-  const [session, setSession] = useState<LoginQrSession | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [state, setState] = useState<'creating' | 'waiting' | 'scanned' | 'expired' | 'success' | 'failed'>('creating');
   const [message, setMessage] = useState('');
@@ -217,7 +260,7 @@ function QrLoginPanel({ providerId, active, onLoggedIn, onFallbackLogin }: { pro
     // 首次创建二维码偶发挂起（分区会话冷启动/瞬时网络问题）：
     // 慢时仅提示"仍在生成"，总期限兜底 + 自动重试一次，避免永久停留
     let result = await callLoginQrCreate(providerId, () => {
-      if (seq === requestSeqRef.current) setMessage('网络较慢，仍在生成二维码...');
+      if (seq === requestSeqRef.current) setMessage('网络较慢，仍在生成二维码…');
     });
     if (seq !== requestSeqRef.current) return;
     if (!result.ok && createQrRetryRef.current < CREATE_QR_MAX_RETRIES) {
@@ -231,7 +274,6 @@ function QrLoginPanel({ providerId, active, onLoggedIn, onFallbackLogin }: { pro
 
     if (result.ok) {
       sessionRef.current = result.data;
-      setSession(result.data);
       if (result.data.qrImageDataUrl) {
         setQrDataUrl(result.data.qrImageDataUrl);
         setState('waiting');
@@ -239,7 +281,7 @@ function QrLoginPanel({ providerId, active, onLoggedIn, onFallbackLogin }: { pro
       } else {
         const canvas = canvasRef.current;
         if (canvas && result.data.qrText) {
-          QRCode.toCanvas(canvas, result.data.qrText, { width: 150, margin: 1 })
+          QRCode.toCanvas(canvas, result.data.qrText, { width: 172, margin: 1 })
             .then(() => {
               if (seq !== requestSeqRef.current) return;
               setState('waiting');
@@ -257,12 +299,12 @@ function QrLoginPanel({ providerId, active, onLoggedIn, onFallbackLogin }: { pro
     } else {
       console.warn(`[login] 二维码创建失败 (${providerId}):`, result.error.message);
       setState('failed');
-      const message = friendlyQrError(result.error.message, '二维码创建失败，请稍后重试');
+      const failureMessage = friendlyQrError(result.error.message, '二维码创建失败，请稍后重试');
       // 中文业务类错误（网络/升级等）提示可尝试浏览器登录
-      if (/登录|升级|版本|切换|网络|失败|超时/i.test(message)) {
-        setMessage(`${message}（可尝试使用浏览器登录）`);
+      if (/登录|升级|版本|切换|网络|失败|超时/i.test(failureMessage)) {
+        setMessage(`${failureMessage}（可尝试使用浏览器登录）`);
       } else {
-        setMessage(message);
+        setMessage(failureMessage);
       }
     }
   }, [providerId]);
@@ -355,78 +397,68 @@ function QrLoginPanel({ providerId, active, onLoggedIn, onFallbackLogin }: { pro
     };
   }, [providerId, active, createSession]);
 
+  const stateHint = QR_STATE_HINT[state] ?? '';
+  const terminal = state === 'expired' || state === 'failed';
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '6px 0' }}>
-      <div
-        style={{
-          width: 160,
-          height: 160,
-          background: '#fff',
-          borderRadius: 'var(--radius-md)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: 'var(--shadow-md)',
-          overflow: 'hidden',
-          position: 'relative'
-        }}
-      >
+    <div className="login-qr-panel">
+      <div className={`login-qr-frame is-${state}`}>
         {qrDataUrl ? (
-          <img src={qrDataUrl} alt="QR Code" style={{ width: '100%', height: '100%' }} />
+          <img src={qrDataUrl} alt="登录二维码" className="login-qr-img" />
         ) : (
-          <canvas ref={canvasRef} />
+          <canvas ref={canvasRef} className="login-qr-canvas" width={172} height={172} />
         )}
-        {(state === 'expired' || state === 'failed') && (
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              background: 'rgba(0,0,0,0.72)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 10,
-              padding: 12,
-              textAlign: 'center'
-            }}
-          >
-            <span style={{ color: '#fff', fontSize: 13 }}>
-              {state === 'expired' ? '二维码已过期' : (friendlyQrError(message, '扫码登录失败'))}
+
+        {state === 'creating' && (
+          <div className="login-qr-spinner" aria-hidden="true">
+            <span className="login-qr-spinner-ring" />
+          </div>
+        )}
+
+        {(state === 'waiting' || state === 'scanned') && (
+          <span className="login-qr-scanline" aria-hidden="true" />
+        )}
+
+        {terminal && (
+          <div className="login-qr-overlay">
+            <span className="login-qr-overlay-text">
+              {state === 'expired' ? '二维码已过期' : friendlyQrError(message, '二维码加载失败')}
             </span>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-              <button className="section-action-btn" onClick={createSession}>刷新二维码</button>
-              {state === 'failed' && (
-                <button className="section-action-btn" onClick={onFallbackLogin}>使用浏览器登录</button>
-              )}
-            </div>
+            <button className="btn-primary login-qr-overlay-btn" onClick={createSession}>
+              <ResetIcon size={15} strokeWidth={2.2} />
+              刷新二维码
+            </button>
           </div>
         )}
       </div>
-      <div style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>
-        {state === 'creating' && '正在生成二维码...'}
-        {state === 'waiting' && `使用${providerLabel(providerId)}手机客户端扫码登录`}
-        {state === 'scanned' && '已扫码，请在手机上确认登录...'}
-        {state === 'success' && '登录成功！'}
-        {message && state !== 'failed' && state !== 'expired' && (
-          <div style={{ marginTop: 4, color: 'var(--accent-primary)' }}>{message}</div>
-        )}
+
+      <div className="login-qr-status" data-state={state} role="status" aria-live="polite">
+        {(state === 'waiting' || state === 'scanned') && <ScanIcon size={15} strokeWidth={2.1} className="login-qr-status-icon" />}
+        {state === 'success' && <CheckIcon size={15} strokeWidth={2.4} className="login-qr-status-icon" />}
+        <span>{terminal ? '扫码遇到问题，可刷新重试' : stateHint}</span>
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+
+      <div className="login-qr-actions">
         {state !== 'success' && (
           <button
-            className="section-action-btn"
+            className="btn-secondary"
             onClick={createSession}
             disabled={state === 'creating'}
             title="重新生成二维码"
           >
+            <ResetIcon size={15} strokeWidth={2.2} />
             刷新二维码
           </button>
         )}
-        <button className="section-action-btn" onClick={onFallbackLogin}>
+        <button className="btn-secondary" onClick={onFallbackLogin}>
           使用浏览器登录
         </button>
       </div>
+
+      <p className="login-qr-footnote">
+        <MusicNoteIcon size={13} strokeWidth={2} />
+        扫码后手机确认，即可同步歌单与播放权限
+      </p>
     </div>
   );
 }
@@ -450,42 +482,47 @@ function LoggedInPanel({
   onSetDefault: () => void;
   onLogout: () => void;
 }) {
+  const [avatarBroken, setAvatarBroken] = useState(false);
+  useEffect(() => {
+    setAvatarBroken(false);
+  }, [avatarUrl]);
+
+  const showAvatar = Boolean(avatarUrl) && !avatarBroken;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '6px 0' }}>
-      {avatarUrl ? (
-        <img src={avatarUrl} alt="" style={{ width: 72, height: 72, borderRadius: '50%', objectFit: 'cover' }} />
+    <div className="login-account-panel">
+      {showAvatar ? (
+        <img
+          className="login-account-avatar"
+          src={avatarUrl}
+          alt=""
+          onError={() => setAvatarBroken(true)}
+        />
       ) : (
-        <div
-          style={{
-            width: 72,
-            height: 72,
-            borderRadius: '50%',
-            background: 'var(--accent-gradient)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-            fontSize: 26,
-            fontWeight: 'var(--font-weight-bold)'
-          }}
-        >
+        <div className="login-account-avatar login-account-avatar--placeholder">
           {(nickname ?? '?').slice(0, 1).toUpperCase()}
         </div>
       )}
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 15, fontWeight: 'var(--font-weight-bold)' }}>{nickname ?? '已登录'}</div>
-        {vipLabel && <div style={{ fontSize: 11.5, color: 'var(--accent-primary)', marginTop: 2 }}>{vipLabel}</div>}
-        <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginTop: 4 }}>
-          {playbackReady ? '播放授权完整' : '播放授权不完整，可能无法播放部分歌曲'}
-        </div>
+
+      <div className="login-account-name">{nickname ?? '已登录'}</div>
+      <div className="login-account-badges">
+        <span className="login-account-badge login-account-badge--provider">{providerLabel(providerId)}</span>
+        {vipLabel && <span className="login-account-badge login-account-badge--vip">{vipLabel}</span>}
+        <span className={`login-account-badge ${playbackReady ? 'login-account-badge--ok' : 'login-account-badge--warn'}`}>
+          {playbackReady ? '播放授权完整' : '播放授权不完整'}
+        </span>
       </div>
-      <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+      {!playbackReady && (
+        <p className="login-account-note">部分歌曲可能因版权或会员限制无法播放</p>
+      )}
+
+      <div className="login-account-actions">
         {!isDefault && (
-          <button className="btn-secondary-action" style={{ padding: '8px 14px', fontSize: 12 }} onClick={onSetDefault}>
+          <button className="btn-secondary" onClick={onSetDefault}>
             设为默认平台
           </button>
         )}
-        <button className="btn-secondary-action" style={{ padding: '8px 14px', fontSize: 12 }} onClick={onLogout}>
+        <button className="btn-ghost login-account-logout" onClick={onLogout}>
           退出登录
         </button>
       </div>

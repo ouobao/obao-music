@@ -99,13 +99,37 @@ export function SearchResultsView({ keyword }: SearchResultsViewProps) {
         : hasMoreSongs || hasMoreEntities;
   const totalVisible = songs.length + artistCards.length + albumCards.length + playlistCards.length;
 
+  // "综合"只展示每类前 N 条，计数必须按实际渲染数量算，
+  // 否则会出现"已显示 120 条"但页面只有 50 条的错觉。
+  const overviewVisibleCount =
+    songs.length +
+    Math.min(8, artistCards.length) +
+    Math.min(6, albumCards.length) +
+    Math.min(6, playlistCards.length);
+  const displayedCount =
+    activeResultView === 'overview'
+      ? overviewVisibleCount
+      : activeResultView === 'song'
+        ? songs.length
+        : activeResultView === 'artist'
+          ? artistCards.length
+          : activeResultView === 'album'
+            ? albumCards.length
+            : playlistCards.length;
+  const countLabel = activeResultView === 'overview'
+    ? `本页展示 ${displayedCount} 条`
+    : `共 ${displayedCount} 条结果`;
+
   return (
     <div aria-busy={Boolean(isLoading)} data-reveal data-reveal-order={0}>
-      <div className="section-header" style={{ marginBottom: 24 }}>
-        <div className="section-title-group">
-          <h1 className="detail-title" style={{ fontSize: 22 }}>“{keyword}” 的搜索结果</h1>
-          <span className="section-sub-title">已显示 {totalVisible} 条结果</span>
+      <div className="search-hero">
+        <div className="search-hero-main">
+          <span className="page-kicker">搜索结果</span>
+          <h1 className="search-hero-title">
+            “<em>{keyword}</em>”
+          </h1>
         </div>
+        <span className="search-count-chip">{countLabel}</span>
       </div>
 
       <div className="filter-pills-bar">
@@ -113,7 +137,6 @@ export function SearchResultsView({ keyword }: SearchResultsViewProps) {
           <button
             key={tab.key}
             className={`pill-item ${activeResultView === tab.key ? 'active' : ''}`}
-            style={activeResultView === tab.key ? { background: 'var(--btn-solid-bg)', color: 'var(--btn-solid-text)', fontWeight: 'var(--font-weight-semibold)' } : undefined}
             onClick={() => setActiveResultView(tab.key)}
           >
             {tab.label}
@@ -288,7 +311,13 @@ function ArtistCardGrid({ cards }: { cards: MediaCardData[] }) {
           {card.coverUrl ? (
             <img className="artist-avatar" src={card.coverUrl} alt={card.title} />
           ) : (
-            <div className="artist-avatar" style={{ background: card.coverTone || 'var(--bg-card)' }} />
+            <div
+              className="artist-avatar artist-avatar--fallback"
+              style={{ background: card.coverTone || 'var(--bg-card)' }}
+              aria-hidden="true"
+            >
+              {card.title.slice(0, 1)}
+            </div>
           )}
           <span className="artist-name">{card.title}</span>
         </button>
